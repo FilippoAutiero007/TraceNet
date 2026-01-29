@@ -1,48 +1,102 @@
-# TraceNet - Network Packet Tracing Tool
+# NetTrace 🌐
 
-TraceNet è una piattaforma avanzata per la simulazione e la visualizzazione di topologie di rete e traffico pacchetti.
+Convert natural language descriptions into Cisco Packet Tracer configurations.
 
-## Struttura del Progetto
+## Overview
 
-Il progetto è suddiviso in tre componenti principali:
+NetTrace is a web application that uses AI (Mistral) to parse natural language network descriptions and generate:
+- VLSM subnet calculations
+- Cisco IOS CLI configurations
+- Ready-to-use network topologies
 
-- **`/nettrace`**: Frontend React 18 con Cytoscape.js per la visualizzazione interattiva della rete e Tailwind CSS per l'interfaccia utente.
-- **`/backend`**: API REST basata su Node.js/Express e TypeScript per la gestione di utenti, progetti e simulazioni.
-- **`/engine`**: Motore di simulazione core scritto in Python (utilizzando Scapy) per la logica di routing e gestione pacchetti.
+## Features
 
-## Requisiti
+- 🤖 **AI-Powered Parsing**: Uses Mistral AI to understand network requirements
+- 📊 **VLSM Calculator**: Optimal subnet allocation with Variable Length Subnet Masking
+- 🔧 **Cisco IOS Output**: Ready-to-paste configuration commands
+- 🎨 **Dark Terminal UI**: Developer-friendly interface
 
+## Quick Start
+
+### Prerequisites
+- Python 3.11+
 - Node.js 18+
-- Python 3.10+
-- PostgreSQL (per il backend)
+- Mistral API Key
 
-## Installazione
+### Environment Setup
 
-### Frontend
+1. Clone the repository
+2. Copy environment files:
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+3. Add your Mistral API key to `backend/.env`
+
+### Running with Docker
+
 ```bash
-cd nettrace
-npm install
-npm run dev
+docker-compose up -d
 ```
 
-### Backend
+### Running Locally
+
+**Backend:**
 ```bash
 cd backend
-npm install
-npm run dev
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8001
 ```
 
-### Simulation Engine
+**Frontend:**
 ```bash
-cd engine
-pip install scapy
-python network_engine.py
+cd frontend
+yarn install
+yarn start
 ```
 
-## Funzionalità Implementate
+## API Endpoints
 
-- [x] Visualizzazione interattiva con Cytoscape.js
-- [x] Dashboard di monitoraggio in tempo reale
-- [x] Motore di simulazione pacchetti (Python)
-- [x] Boilerplate API Backend (Express/TS)
-- [x] Supporto per diverse topologie di rete
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
+| POST | `/api/generate` | Generate network config |
+
+### Generate Request Example
+
+```json
+{
+  "description": "Create 3 subnets with 50 hosts each from 192.168.1.0/24 with 1 router and 3 switches"
+}
+```
+
+## Project Structure
+
+```
+NetTrace/
+├── backend/
+│   ├── app/
+│   │   ├── main.py              # FastAPI entry point
+│   │   ├── routers/generate.py  # API endpoints
+│   │   └── services/
+│   │       ├── nlp_parser.py    # Mistral AI integration
+│   │       ├── subnet_calculator.py
+│   │       └── pkt_generator.py
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── services/api.js
+│   │   └── App.js
+│   └── package.json
+└── docker-compose.yml
+```
+
+## Tech Stack
+
+- **Backend**: Python, FastAPI, Mistral AI
+- **Frontend**: React, TailwindCSS
+- **Database**: PostgreSQL (optional for saving configs)
+
+## License
+
+MIT License
