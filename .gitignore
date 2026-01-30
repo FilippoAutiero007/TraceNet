@@ -1,4 +1,42 @@
-node_modules/
-dist/
+# Node.js / Frontend
+**/node_modules/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# Build outputs
+**/build/
+**/dist/
+**/out/
+
+# Environment variables
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+frontend/.env*
+
+# Docker
+.dockerignore
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Python / Backend
 __pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
