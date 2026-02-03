@@ -1,102 +1,37 @@
-# NetTrace 🌐
+# NetTrace MCP Server
 
-Convert natural language descriptions into Cisco Packet Tracer configurations.
+Generatore di reti Cisco Packet Tracer (.pkt) da linguaggio naturale.
 
-## Overview
+## Funzionalità
+- Parsing di descrizioni NLP per estrarre topologia e requisiti.
+- Calcolo automatico VLSM per ottimizzazione indirizzi IP.
+- Generazione di configurazioni IOS complete (Hostname, Interfacce, RIP/OSPF).
+- Esportazione in formato `.pkt` (XML compresso con gzip) compatibile con Packet Tracer 8.x.
 
-NetTrace is a web application that uses AI (Mistral) to parse natural language network descriptions and generate:
-- VLSM subnet calculations
-- Cisco IOS CLI configurations
-- Ready-to-use network topologies
-
-## Features
-
-- 🤖 **AI-Powered Parsing**: Uses Mistral AI to understand network requirements
-- 📊 **VLSM Calculator**: Optimal subnet allocation with Variable Length Subnet Masking
-- 🔧 **Cisco IOS Output**: Ready-to-paste configuration commands
-- 🎨 **Dark Terminal UI**: Developer-friendly interface
-
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Mistral API Key
-
-### Environment Setup
-
-1. Clone the repository
-2. Copy environment files:
+## Installazione
+1. Assicurati di avere Python 3.10+ installato.
+2. Installa le dipendenze:
    ```bash
-   cp backend/.env.example backend/.env
+   pip install mcp openai pydantic
    ```
-3. Add your Mistral API key to `backend/.env`
+3. Configura la tua chiave API OpenAI nell'ambiente.
 
-### Running with Docker
-
-```bash
-docker-compose up -d
-```
-
-### Running Locally
-
-**Backend:**
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8001
-```
-
-**Frontend:**
-```bash
-cd frontend
-yarn install
-yarn start
-```
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| POST | `/api/generate` | Generate network config |
-
-### Generate Request Example
+## Utilizzo con Claude Desktop
+Aggiungi quanto segue al tuo file `claude_desktop_config.json`:
 
 ```json
 {
-  "description": "Create 3 subnets with 50 hosts each from 192.168.1.0/24 with 1 router and 3 switches"
+  "mcpServers": {
+    "nettrace": {
+      "command": "python",
+      "args": ["-m", "nettrace.server"],
+      "env": {
+        "OPENAI_API_KEY": "tua_chiave_api"
+      }
+    }
+  }
 }
 ```
 
-## Project Structure
-
-```
-NetTrace/
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── routers/generate.py  # API endpoints
-│   │   └── services/
-│   │       ├── nlp_parser.py    # Mistral AI integration
-│   │       ├── subnet_calculator.py
-│   │       └── pkt_generator.py
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── services/api.js
-│   │   └── App.js
-│   └── package.json
-└── docker-compose.yml
-```
-
-## Tech Stack
-
-- **Backend**: Python, FastAPI, Mistral AI
-- **Frontend**: React, TailwindCSS
-- **Database**: PostgreSQL (optional for saving configs)
-
-## License
-
-MIT License
+## Esempio di Chiamata
+"Crea una rete con 2 VLAN: Vendite (50 host) e IT (20 host). Usa OSPF come protocollo di routing."
