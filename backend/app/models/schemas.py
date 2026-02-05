@@ -3,7 +3,7 @@ Pydantic models for NetTrace API
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from enum import Enum
 
 class RoutingProtocol(str, Enum):
@@ -19,8 +19,8 @@ class SubnetRequest(BaseModel):
 
 class DeviceConfig(BaseModel):
     """Device configuration"""
-    routers: int = Field(default=0, ge=0)
-    switches: int = Field(default=0, ge=0)
+    routers: int = Field(default=1, ge=0)
+    switches: int = Field(default=1, ge=0)
     pcs: int = Field(default=0, ge=0)
 
 class NetworkConfig(BaseModel):
@@ -51,4 +51,20 @@ class GenerateResponse(BaseModel):
     config_json: Optional[NetworkConfig] = None
     subnets: Optional[List[SubnetResult]] = None
     cli_script: Optional[str] = None
+    error: Optional[str] = None
+
+class PktGenerateRequest(BaseModel):
+    """Request body for /api/generate-pkt endpoint"""
+    description: str = Field(..., min_length=10, description="Natural language network description")
+
+class PktGenerateResponse(BaseModel):
+    """Response from /api/generate-pkt endpoint with .pkt file info"""
+    success: bool
+    message: Optional[str] = None
+    pkt_path: Optional[str] = None
+    xml_path: Optional[str] = None
+    pkt_download_url: Optional[str] = None
+    xml_download_url: Optional[str] = None
+    config_summary: Optional[Dict[str, Any]] = None
+    subnets: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None

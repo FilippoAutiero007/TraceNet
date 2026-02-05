@@ -1,247 +1,383 @@
 #!/usr/bin/env python3
 """
 NetTrace Backend API Testing Suite
-Tests all API endpoints and functionality
+Tests all backend functionality including Mistral AI integration, VLSM calculation, and Cisco config generation
 """
 
 import requests
-import sys
 import json
+import sys
 from datetime import datetime
 
 class NetTraceAPITester:
-    def __init__(self, base_url="https://ae3b09ff-0c74-4b9a-b93d-e3b6cb1b32d4.preview.emergentagent.com"):
+    def __init__(self, base_url="http://localhost:8001"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0
-        self.failed_tests = []
+        self.test_results = []
 
-    def run_test(self, name, method, endpoint, expected_status, data=None, timeout=30):
-        """Run a single API test"""
-        url = f"{self.base_url}/{endpoint}"
-        headers = {'Content-Type': 'application/json'}
-
+    def log_test(self, name, success, details=""):
+        """Log test result"""
         self.tests_run += 1
-        print(f"\n🔍 Testing {name}...")
-        print(f"   URL: {url}")
-        
-        try:
-            if method == 'GET':
-                response = requests.get(url, headers=headers, timeout=timeout)
-            elif method == 'POST':
-                response = requests.post(url, json=data, headers=headers, timeout=timeout)
-
-            success = response.status_code == expected_status
-            
-            if success:
-                self.tests_passed += 1
-                print(f"✅ Passed - Status: {response.status_code}")
-                try:
-                    response_data = response.json()
-                    print(f"   Response: {json.dumps(response_data, indent=2)[:200]}...")
-                    return True, response_data
-                except:
-                    return True, response.text
-            else:
-                print(f"❌ Failed - Expected {expected_status}, got {response.status_code}")
-                print(f"   Response: {response.text[:200]}...")
-                self.failed_tests.append({
-                    'name': name,
-                    'expected': expected_status,
-                    'actual': response.status_code,
-                    'response': response.text[:200]
-                })
-                return False, {}
-
-        except requests.exceptions.Timeout:
-            print(f"❌ Failed - Request timeout after {timeout}s")
-            self.failed_tests.append({'name': name, 'error': 'Timeout'})
-            return False, {}
-        except Exception as e:
-            print(f"❌ Failed - Error: {str(e)}")
-            self.failed_tests.append({'name': name, 'error': str(e)})
-            return False, {}
-
-    def test_health_endpoint(self):
-        """Test GET /api/health endpoint"""
-        success, response = self.run_test(
-            "Health Check",
-            "GET",
-            "api/health",
-            200
-        )
-        
         if success:
-            # Verify response structure
-            if isinstance(response, dict) and 'status' in response:
-                if response['status'] == 'healthy':
-                    print("   ✅ Health status is 'healthy'")
+            self.tests_passed += 1
+            print(f"✅ {name}")
+        else:
+            print(f"❌ {name} - {details}")
+        
+        self.test_results.append({
+            "test": name,
+            "success": success,
+            "details": details
+        })
+
+    def test_health_check(self):
+        """Test /api/health endpoint"""
+        try:
+            response = requests.get(f"{self.base_url}/api/health", timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("status") == "healthy" and data.get("service") == "NetTrace API":
+                    self.log_test("Health Check", True)
                     return True
                 else:
-                    print(f"   ⚠️  Health status is '{response.get('status')}', expected 'healthy'")
+                    self.log_test("Health Check", False, f"Invalid response data: {data}")
+                    return False
             else:
-                print("   ⚠️  Invalid health response structure")
-        
-        return success
-
-    def test_generate_endpoint_simple(self):
-        """Test POST /api/generate with simple description"""
-        test_description = "Create 2 subnets with 30 hosts each from 192.168.1.0/24"
-        
-        success, response = self.run_test(
-            "Generate Network - Simple",
-            "POST",
-            "api/generate",
-            200,
-            data={"description": test_description},
-            timeout=60  # Longer timeout for AI processing
-        )
-        
-        if success and isinstance(response, dict):
-            # Verify response structure
-            required_fields = ['success', 'config_json', 'subnets', 'cli_script']
-            missing_fields = [field for field in required_fields if field not in response]
-            
-            if missing_fields:
-                print(f"   ⚠️  Missing fields: {missing_fields}")
+                self.log_test("Health Check", False, f"Status code: {response.status_code}")
                 return False
-            
-            if response.get('success'):
-                print("   ✅ Generation successful")
                 
-                # Check config_json
-                config = response.get('config_json')
-                if config and 'base_network' in config:
-                    print(f"   ✅ Base network: {config['base_network']}")
-                
-                # Check subnets
-                subnets = response.get('subnets')
-                if subnets and len(subnets) > 0:
-                    print(f"   ✅ Generated {len(subnets)} subnets")
-                    for i, subnet in enumerate(subnets[:2]):  # Show first 2
-                        print(f"      Subnet {i+1}: {subnet.get('name')} - {subnet.get('network')}")
-                
-                # Check CLI script
-                cli_script = response.get('cli_script')
-                if cli_script and len(cli_script) > 100:
-                    print(f"   ✅ CLI script generated ({len(cli_script)} characters)")
-                
-                return True
-            else:
-                error = response.get('error', 'Unknown error')
-                print(f"   ❌ Generation failed: {error}")
-                return False
-        
-        return success
-
-    def test_generate_endpoint_complex(self):
-        """Test POST /api/generate with complex description"""
-        test_description = "I need 4 networks: 100 hosts, 50 hosts, 25 hosts, and 10 hosts using 10.0.0.0/16 with OSPF routing and 2 routers and 3 switches"
-        
-        success, response = self.run_test(
-            "Generate Network - Complex",
-            "POST",
-            "api/generate",
-            200,
-            data={"description": test_description},
-            timeout=60
-        )
-        
-        if success and isinstance(response, dict) and response.get('success'):
-            config = response.get('config_json', {})
-            
-            # Check routing protocol
-            routing = config.get('routing_protocol')
-            if routing and routing.upper() == 'OSPF':
-                print("   ✅ OSPF routing protocol detected")
-            
-            # Check devices
-            devices = config.get('devices', {})
-            if devices.get('routers') >= 2:
-                print(f"   ✅ Routers: {devices.get('routers')}")
-            if devices.get('switches') >= 3:
-                print(f"   ✅ Switches: {devices.get('switches')}")
-            
-            # Check subnets count
-            subnets = response.get('subnets', [])
-            if len(subnets) >= 4:
-                print(f"   ✅ Generated {len(subnets)} subnets as requested")
-            
-            return True
-        
-        return success
-
-    def test_generate_endpoint_invalid(self):
-        """Test POST /api/generate with invalid input"""
-        success, response = self.run_test(
-            "Generate Network - Invalid Input",
-            "POST",
-            "api/generate",
-            200,  # API returns 200 with success=false for validation errors
-            data={"description": "xyz"}  # Too short/invalid
-        )
-        
-        if success and isinstance(response, dict):
-            if not response.get('success') and 'error' in response:
-                print("   ✅ Properly handled invalid input")
-                return True
-        
-        return False
+        except Exception as e:
+            self.log_test("Health Check", False, f"Exception: {str(e)}")
+            return False
 
     def test_root_endpoint(self):
-        """Test GET /api endpoint"""
-        success, response = self.run_test(
-            "Root API Endpoint",
-            "GET",
-            "api",
-            200
-        )
-        return success
+        """Test /api root endpoint"""
+        try:
+            response = requests.get(f"{self.base_url}/api", timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "message" in data and "NetTrace API" in data["message"]:
+                    self.log_test("Root Endpoint", True)
+                    return True
+                else:
+                    self.log_test("Root Endpoint", False, f"Invalid response: {data}")
+                    return False
+            else:
+                self.log_test("Root Endpoint", False, f"Status code: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Root Endpoint", False, f"Exception: {str(e)}")
+            return False
 
-    def print_summary(self):
-        """Print test summary"""
-        print(f"\n{'='*60}")
-        print(f"📊 TEST SUMMARY")
-        print(f"{'='*60}")
-        print(f"Tests Run: {self.tests_run}")
-        print(f"Tests Passed: {self.tests_passed}")
-        print(f"Tests Failed: {self.tests_run - self.tests_passed}")
-        print(f"Success Rate: {(self.tests_passed/self.tests_run*100):.1f}%")
+    def test_generate_endpoint_basic(self):
+        """Test /api/generate endpoint with basic request"""
+        try:
+            payload = {
+                "description": "Create 2 subnets with 50 hosts each from 192.168.1.0/24 with 1 router"
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/generate", 
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Check response structure
+                if not isinstance(data, dict):
+                    self.log_test("Generate Endpoint Basic", False, "Response is not a JSON object")
+                    return False
+                
+                if data.get("success") is True:
+                    # Validate required fields
+                    required_fields = ["config_json", "subnets", "cli_script"]
+                    missing_fields = [field for field in required_fields if field not in data or data[field] is None]
+                    
+                    if missing_fields:
+                        self.log_test("Generate Endpoint Basic", False, f"Missing fields: {missing_fields}")
+                        return False
+                    
+                    # Validate subnets
+                    subnets = data.get("subnets", [])
+                    if len(subnets) < 2:
+                        self.log_test("Generate Endpoint Basic", False, f"Expected 2 subnets, got {len(subnets)}")
+                        return False
+                    
+                    # Validate CLI script
+                    cli_script = data.get("cli_script", "")
+                    if not cli_script or len(cli_script) < 100:
+                        self.log_test("Generate Endpoint Basic", False, "CLI script too short or empty")
+                        return False
+                    
+                    self.log_test("Generate Endpoint Basic", True)
+                    return True
+                    
+                elif data.get("success") is False:
+                    error_msg = data.get("error", "Unknown error")
+                    self.log_test("Generate Endpoint Basic", False, f"API returned error: {error_msg}")
+                    return False
+                else:
+                    self.log_test("Generate Endpoint Basic", False, f"Invalid success field: {data.get('success')}")
+                    return False
+            else:
+                self.log_test("Generate Endpoint Basic", False, f"Status code: {response.status_code}, Response: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Generate Endpoint Basic", False, f"Exception: {str(e)}")
+            return False
+
+    def test_vlsm_calculation(self):
+        """Test VLSM calculation with different subnet sizes"""
+        try:
+            payload = {
+                "description": "Create 4 networks: 100 hosts, 50 hosts, 25 hosts, and 10 hosts using 192.168.0.0/24"
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/generate", 
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("success") is True:
+                    subnets = data.get("subnets", [])
+                    
+                    if len(subnets) != 4:
+                        self.log_test("VLSM Calculation", False, f"Expected 4 subnets, got {len(subnets)}")
+                        return False
+                    
+                    # Check if subnets have proper VLSM allocation (largest first)
+                    host_counts = [subnet.get("usable_hosts", 0) for subnet in subnets]
+                    
+                    # Verify each subnet has enough hosts
+                    expected_minimums = [100, 50, 25, 10]
+                    for i, (actual, minimum) in enumerate(zip(host_counts, expected_minimums)):
+                        if actual < minimum:
+                            self.log_test("VLSM Calculation", False, 
+                                        f"Subnet {i+1} has {actual} hosts, needs at least {minimum}")
+                            return False
+                    
+                    # Verify subnet structure
+                    for i, subnet in enumerate(subnets):
+                        required_fields = ["name", "network", "mask", "gateway", "usable_range"]
+                        missing = [field for field in required_fields if field not in subnet]
+                        if missing:
+                            self.log_test("VLSM Calculation", False, 
+                                        f"Subnet {i+1} missing fields: {missing}")
+                            return False
+                    
+                    self.log_test("VLSM Calculation", True)
+                    return True
+                else:
+                    error_msg = data.get("error", "Unknown error")
+                    self.log_test("VLSM Calculation", False, f"API error: {error_msg}")
+                    return False
+            else:
+                self.log_test("VLSM Calculation", False, f"Status code: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_test("VLSM Calculation", False, f"Exception: {str(e)}")
+            return False
+
+    def test_cisco_config_generation(self):
+        """Test Cisco IOS configuration generation"""
+        try:
+            payload = {
+                "description": "Setup 2 subnets for 30 users each from 172.16.0.0/24 with OSPF routing and 1 router, 2 switches"
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/generate", 
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("success") is True:
+                    cli_script = data.get("cli_script", "")
+                    
+                    # Check for essential Cisco configuration elements
+                    required_elements = [
+                        "hostname",
+                        "interface",
+                        "ip address",
+                        "no shutdown",
+                        "router ospf"  # Should have OSPF since specified
+                    ]
+                    
+                    missing_elements = []
+                    for element in required_elements:
+                        if element not in cli_script.lower():
+                            missing_elements.append(element)
+                    
+                    if missing_elements:
+                        self.log_test("Cisco Config Generation", False, 
+                                    f"Missing elements: {missing_elements}")
+                        return False
+                    
+                    # Check for proper structure
+                    if len(cli_script) < 500:  # Should be substantial
+                        self.log_test("Cisco Config Generation", False, 
+                                    f"Config too short: {len(cli_script)} chars")
+                        return False
+                    
+                    self.log_test("Cisco Config Generation", True)
+                    return True
+                else:
+                    error_msg = data.get("error", "Unknown error")
+                    self.log_test("Cisco Config Generation", False, f"API error: {error_msg}")
+                    return False
+            else:
+                self.log_test("Cisco Config Generation", False, f"Status code: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Cisco Config Generation", False, f"Exception: {str(e)}")
+            return False
+
+    def test_mistral_integration(self):
+        """Test Mistral AI integration with complex description"""
+        try:
+            payload = {
+                "description": "I need a corporate network with a main office subnet for 200 employees, a guest network for 50 devices, a server farm for 20 servers, and a management network for 10 network devices. Use 10.0.0.0/16 as base network with RIP routing protocol."
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/generate", 
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=45  # Longer timeout for AI processing
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("success") is True:
+                    config_json = data.get("config_json", {})
+                    
+                    # Verify AI parsed the description correctly
+                    if config_json.get("base_network") != "10.0.0.0/16":
+                        self.log_test("Mistral Integration", False, 
+                                    f"Wrong base network: {config_json.get('base_network')}")
+                        return False
+                    
+                    if config_json.get("routing_protocol") != "RIP":
+                        self.log_test("Mistral Integration", False, 
+                                    f"Wrong routing protocol: {config_json.get('routing_protocol')}")
+                        return False
+                    
+                    subnets = data.get("subnets", [])
+                    if len(subnets) < 4:  # Should have at least 4 subnets
+                        self.log_test("Mistral Integration", False, 
+                                    f"Expected at least 4 subnets, got {len(subnets)}")
+                        return False
+                    
+                    # Check CLI has RIP configuration
+                    cli_script = data.get("cli_script", "")
+                    if "router rip" not in cli_script.lower():
+                        self.log_test("Mistral Integration", False, "RIP configuration not found in CLI")
+                        return False
+                    
+                    self.log_test("Mistral Integration", True)
+                    return True
+                else:
+                    error_msg = data.get("error", "Unknown error")
+                    self.log_test("Mistral Integration", False, f"API error: {error_msg}")
+                    return False
+            else:
+                self.log_test("Mistral Integration", False, f"Status code: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Mistral Integration", False, f"Exception: {str(e)}")
+            return False
+
+    def test_error_handling(self):
+        """Test API error handling"""
+        try:
+            # Test with invalid/empty description
+            payload = {"description": ""}
+            
+            response = requests.post(
+                f"{self.base_url}/api/generate", 
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=10
+            )
+            
+            # Should return 422 for validation error or 200 with success=false
+            if response.status_code == 422:
+                self.log_test("Error Handling", True)
+                return True
+            elif response.status_code == 200:
+                data = response.json()
+                if data.get("success") is False and data.get("error"):
+                    self.log_test("Error Handling", True)
+                    return True
+                else:
+                    self.log_test("Error Handling", False, "Should return error for empty description")
+                    return False
+            else:
+                self.log_test("Error Handling", False, f"Unexpected status code: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Error Handling", False, f"Exception: {str(e)}")
+            return False
+
+    def run_all_tests(self):
+        """Run all backend tests"""
+        print("🚀 Starting NetTrace Backend API Tests")
+        print("=" * 50)
         
-        if self.failed_tests:
-            print(f"\n❌ FAILED TESTS:")
-            for test in self.failed_tests:
-                error_msg = test.get('error', f"Expected {test.get('expected')}, got {test.get('actual')}")
-                print(f"   - {test['name']}: {error_msg}")
+        # Basic connectivity tests
+        if not self.test_health_check():
+            print("❌ Health check failed - stopping tests")
+            return False
+            
+        self.test_root_endpoint()
         
-        return self.tests_passed == self.tests_run
+        # Core functionality tests
+        self.test_generate_endpoint_basic()
+        self.test_vlsm_calculation()
+        self.test_cisco_config_generation()
+        self.test_mistral_integration()
+        self.test_error_handling()
+        
+        # Print summary
+        print("\n" + "=" * 50)
+        print(f"📊 Test Results: {self.tests_passed}/{self.tests_run} passed")
+        
+        if self.tests_passed == self.tests_run:
+            print("🎉 All tests passed!")
+            return True
+        else:
+            print(f"⚠️  {self.tests_run - self.tests_passed} tests failed")
+            return False
 
 def main():
-    print("🚀 Starting NetTrace Backend API Tests")
-    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+    """Main test runner"""
     tester = NetTraceAPITester()
+    success = tester.run_all_tests()
     
-    # Run all tests
-    tests = [
-        tester.test_health_endpoint,
-        tester.test_root_endpoint,
-        tester.test_generate_endpoint_simple,
-        tester.test_generate_endpoint_complex,
-        tester.test_generate_endpoint_invalid
-    ]
-    
-    for test in tests:
-        try:
-            test()
-        except Exception as e:
-            print(f"❌ Test {test.__name__} crashed: {e}")
-            tester.failed_tests.append({'name': test.__name__, 'error': f'Crashed: {e}'})
-    
-    # Print summary
-    all_passed = tester.print_summary()
-    
-    return 0 if all_passed else 1
+    # Return appropriate exit code
+    return 0 if success else 1
 
 if __name__ == "__main__":
     sys.exit(main())

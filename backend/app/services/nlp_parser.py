@@ -20,12 +20,20 @@ Return ONLY valid JSON with this exact structure:
 }
 
 Rules:
-- base_network: Use CIDR notation (e.g., "192.168.1.0/24")
-- subnets: Array of objects with name and required_hosts
-- devices: Count of each device type mentioned
-- routing_protocol: One of "static", "RIP", "OSPF", "EIGRP"
+- base_network: Use CIDR notation (e.g., "192.168.1.0/24"). Default: "192.168.0.0/16"
+- subnets: Array of objects with name and required_hosts (extract from VLAN names, building names, etc.)
+- devices: Count of each device type mentioned (routers, switches, pcs)
+- routing_protocol: One of "static", "RIP", "OSPF", "EIGRP" (default: static)
+- Extract numbers from text (e.g., "cinquanta host" → 50, "50 hosts" → 50)
 - If not specified, use sensible defaults
-- Always return valid JSON, nothing else"""
+- ALWAYS return valid JSON, nothing else
+
+Examples:
+Input: "Crea rete con VLAN Sales 50 host e IT 30 host, usa OSPF"
+Output: {"base_network":"192.168.0.0/16","subnets":[{"name":"Sales","required_hosts":50},{"name":"IT","required_hosts":30}],"devices":{"routers":1,"switches":2,"pcs":80},"routing_protocol":"OSPF"}
+
+Input: "Network with 3 buildings: A (100 hosts), B (50 hosts), C (25 hosts)"
+Output: {"base_network":"192.168.0.0/16","subnets":[{"name":"Building_A","required_hosts":100},{"name":"Building_B","required_hosts":50},{"name":"Building_C","required_hosts":25}],"devices":{"routers":3,"switches":3,"pcs":175},"routing_protocol":"static"}"""
 
 async def parse_network_description(description: str) -> NetworkConfig | None:
     """
@@ -40,13 +48,13 @@ async def parse_network_description(description: str) -> NetworkConfig | None:
     api_key = os.environ.get("MISTRAL_API_KEY")
     
     if not api_key:
-        raise ValueError("MISTRAL_API_KEY not configured")
+        raise ValueError("MISTRAL_API_KEY not configured. Set MISTRAL_API_KEY in .env file.")
     
     client = Mistral(api_key=api_key)
     
     try:
         response = client.chat.complete(
-            model="mistral-large-latest",
+            model="mistral-small-latest",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Parse this network description:\n\n{description}"}
@@ -64,10 +72,14 @@ async def parse_network_description(description: str) -> NetworkConfig | None:
             for i, s in enumerate(data.get("subnets", []))
         ]
         
+        # Default subnet if none specified
+        if not subnets:
+            subnets = [SubnetRequest(name="LAN", required_hosts=30)]
+        
         devices_data = data.get("devices", {})
         devices = DeviceConfig(
-            routers=devices_data.get("routers", 1),
-            switches=devices_data.get("switches", 0),
+            routers=max(1, devices_data.get("routers", 1)),
+            switches=max(1, devices_data.get("switches", 1)),
             pcs=devices_data.get("pcs", 0)
         )
         
@@ -84,7 +96,7 @@ async def parse_network_description(description: str) -> NetworkConfig | None:
             protocol = RoutingProtocol.STATIC
         
         return NetworkConfig(
-            base_network=data.get("base_network", "192.168.1.0/24"),
+            base_network=data.get("base_network", "192.168.0.0/16"),
             subnets=subnets,
             devices=devices,
             routing_protocol=protocol
