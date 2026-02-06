@@ -2,13 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install system dependencies
-# git, build-essential: for building pka2xml
-# libcrypto++-dev, libzip-dev, libre2-dev, zlib1g-dev: pka2xml dependencies
+# Install system dependencies including static libraries
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
@@ -18,11 +12,25 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pka2xml
-# Clone, build with Makefile, and move binary to /usr/local/bin
+# Build and install RE2 from source (static library)
+RUN git clone https://github.com/google/re2.git /tmp/re2 && \
+    cd /tmp/re2 && \
+    make && \
+    make install && \
+    rm -rf /tmp/re2
+
+# Build and install Crypto++ from source (static library)
+RUN git clone https://github.com/weidai11/cryptopp.git /tmp/cryptopp && \
+    cd /tmp/cryptopp && \
+    make static && \
+    make install && \
+    rm -rf /tmp/cryptopp
+
+# Install pka2xml with dynamic linking (simpler, works with installed libs)
 RUN git clone https://github.com/mircodz/pka2xml.git /tmp/pka2xml && \
     cd /tmp/pka2xml && \
-    make && \
+    sed -i 's/pka2xml-static/pka2xml-dynamic/' Makefile && \
+    make pka2xml-dynamic && \
     cp pka2xml /usr/local/bin/ && \
     rm -rf /tmp/pka2xml
 
@@ -33,7 +41,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Expose port (default for uvicorn)
+# Expose port
 EXPOSE 8001
 
 # Run command
