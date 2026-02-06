@@ -211,7 +211,25 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
         link_rs.set("type", "Straight")
         
         # -- HOSTS (PCs) --
-        hosts_count = min(subnet.hosts_count, 5) # Cap hosts for demo
+        # Use usable_hosts from result, capped at 5 for visual clarity
+        hosts_count = min(subnet.usable_hosts, 5) 
+        
+        # Generator for IP addresses
+        import ipaddress
+        try:
+            net_obj = ipaddress.ip_network(subnet.network, strict=False)
+            # Skip gateway (first IP) and network/broadcast
+            # hosts() iterator yields usable IPs. 
+            # We skip the first one if it's the gateway (usually is).
+            available_ips = list(net_obj.hosts())
+            # Assuming gateway is at index 0 (as per subnet_calculator), start PCs from index 1
+            ip_iter = iter(available_ips)
+            # Skip gateway
+            next(ip_iter, None) 
+        except Exception as e:
+            print(f"IP Calc Error: {e}")
+            ip_iter = iter([])
+
         for h_idx in range(hosts_count):
             pc_name = f"PC{subnet_idx+1}_{h_idx+1}"
             pc = ET.SubElement(devices_node, "DEVICE")
@@ -224,12 +242,10 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
             coords.set("y", str(current_y + 300))
             
             # PC Interface
-            # Simple assumption: IP calculation logic should be robust, here simplified
-            # Assuming subnet.hosts[h_idx] exists or generating one
             try:
-                pc_ip = str(list(subnet.hosts)[h_idx])
-            except:
-                pc_ip = "0.0.0.0" # Fallback
+                pc_ip = str(next(ip_iter))
+            except StopIteration:
+                pc_ip = "0.0.0.0" # Should not happen if logic is correct
             
             p_iface = ET.SubElement(pc, "INTERFACE")
             p_iface.set("name", "FastEthernet0")

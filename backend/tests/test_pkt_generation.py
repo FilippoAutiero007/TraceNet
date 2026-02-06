@@ -11,11 +11,11 @@ from app.services.pkt_file_generator import (
 
 # Mock classes for testing logic
 class MockSubnet:
-    def __init__(self, gateway, mask, hosts):
+    def __init__(self, gateway, mask, network, usable_hosts):
         self.gateway = gateway
         self.mask = mask
-        self.hosts_count = len(hosts)
-        self.hosts = hosts
+        self.network = network # Needs valid CIDR for ipaddress module
+        self.usable_hosts = usable_hosts
 
 def test_legacy_xor_roundtrip():
     """Verify that legacy encoding followed by decoding returns original content"""
@@ -32,7 +32,8 @@ def test_legacy_xor_roundtrip():
 
 def test_xml_structure_builder():
     """Verify that build_pkt_xml produces expected tags"""
-    subnets = [MockSubnet("192.168.1.1", "255.255.255.0", ["192.168.1.2"])]
+    # 192.168.1.0/24 has usable hosts
+    subnets = [MockSubnet("192.168.1.1", "255.255.255.0", "192.168.1.0/24", 254)]
     config = {}
     
     xml_out = build_pkt_xml(subnets, config)
