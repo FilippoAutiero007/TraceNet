@@ -68,8 +68,31 @@
 @layer base {
   * {
     @apply border-border;
+    box-sizing: border-box;
   }
+  
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    min-height: 100vh;
+    background-color: #020617; /* slate-950 */
+    overflow-x: hidden; /* Prevent horizontal scroll */
+  }
+  
   body {
     @apply bg-background text-foreground;
+  }
+  
+  /* Remove max-width constraint that creates sidebars */
+  .container {
+    width: 100%;
+    padding: 0 1rem;
+  }
+  
+  /* Full-width sections */
+  section {
+    width: 100%;
+    padding: 2rem 1rem;
   }
 }
