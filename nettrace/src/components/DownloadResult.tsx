@@ -31,7 +31,7 @@ interface DownloadResultProps {
 }
 
 export function DownloadResult({ data }: DownloadResultProps) {
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
   const pktUrl = `${API_URL}${data.pkt_download_url}`;
   const xmlUrl = data.xml_download_url ? `${API_URL}${data.xml_download_url}` : null;
 

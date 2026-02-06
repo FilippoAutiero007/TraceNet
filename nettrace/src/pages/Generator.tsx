@@ -41,7 +41,7 @@ export function Generator() {
     setError(null);
     setResult(null);
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
 
     try {
       const response = await fetch(`${API_URL}/api/generate-pkt`, {
