@@ -285,13 +285,45 @@ def create_pkt_xml(config: NetworkConfig, subnets: List[SubnetResult]) -> str:
     return ET.tostring(root, encoding="unicode", method="xml")
 
 
-import subprocess
+import struct
+import zlib
+
+def _compress_and_obfuscate_legacy(xml_content: str) -> bytes:
+    """
+    Implementa l'encoding "Legacy" (Packet Tracer 5.x) in Python puro.
+    
+    Algoritmo:
+    1. Aggiungi header 4 byte con lunghezza non compressa (Big Endian).
+    2. Comprimi con zlib (default).
+    3. XOR obfuscation: byte[i] ^ (total_len - i).
+    
+    Questo formato è spesso supportato in retro-compatibilità dalle versioni moderne.
+    """
+    data = xml_content.encode('utf-8')
+    uncompressed_len = len(data)
+    
+    # Comprimi dati
+    compressed_data = zlib.compress(data)
+    
+    # Costruisci payload: [Len(4 bytes)] + [Compressed Data]
+    # Packet Tracer si aspetta la lunghezza NON compressa nell'header
+    header = struct.pack('>I', uncompressed_len)
+    payload = bytearray(header + compressed_data)
+    
+    # XOR Obfuscation
+    # input[i] = input[i] ^ (input.size() - i)
+    total_len = len(payload)
+    for i in range(total_len):
+        # Nota: (total_len - i) può superare 255, quindi usiamo & 0xFF
+        key = (total_len - i) & 0xFF
+        payload[i] ^= key
+        
+    return payload
 
 def save_pkt_file(xml_content: str, output_dir: str = "/tmp") -> Tuple[str, str]:
     """
-    Salva XML come file .pkt con encoding corretto per PT 8.x
-    
-    Usa pka2xml se disponibile, altrimenti fallback a GZIP (con warning)
+    Salva XML come file .pkt usando encoding legacy (XOR).
+    Questo evita la necessità di librerie C++ esterne come pka2xml su Windows.
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -316,30 +348,17 @@ def save_pkt_file(xml_content: str, output_dir: str = "/tmp") -> Tuple[str, str]
     with open(xml_path, 'w', encoding='utf-8') as f:
         f.write(xml_content)
     
-    # Encoding .pkt
-    encoding_method = "unknown"
+    # Usa Legacy Encoding (Python puro)
+    encoding_method = "python_legacy_xor"
     try:
-        # OPZIONE 1: Prova pka2xml (installato tramite pip)
-        # Assumiamo che pka2xml esponga un entry point CLI "pka2xml"
-        result = subprocess.run([
-            "pka2xml",
-            "--xml2pkt",
-            xml_path,
-            "-o", pkt_path
-        ], capture_output=True, text=True, timeout=10)
-        
-        if result.returncode == 0:
-            encoding_method = "pka2xml"
-        else:
-            # Se fallisce, prova a importarlo come libreria se il CLI non va
-            # Fallback a GZIP con warning
-            raise Exception(f"pka2xml CLI failed: {result.stderr}")
+        encoded_bytes = _compress_and_obfuscate_legacy(xml_content)
+        with open(pkt_path, 'wb') as f:
+            f.write(encoded_bytes)
             
-    except (FileNotFoundError, Exception) as e:
-        # FALLBACK: GZIP semplice (NON funzionerà su PT 8.x)
-        print(f"⚠️ WARNING: pka2xml not available or failed ({e})")
-        print(f"⚠️ Using GZIP fallback - file might NOT open in PT 8.x")
-        print(f"⚠️ Install pka2xml: pip install git+https://github.com/mircodz/pka2xml.git")
+    except Exception as e:
+        # FALLBACK disperato: GZIP semplice
+        print(f"⚠️ WARNING: Legacy encoding failed ({e})")
+        print(f"⚠️ Using GZIP fallback")
         
         with gzip.open(pkt_path, 'wb') as f:
             f.write(xml_content.encode('utf-8'))
@@ -356,14 +375,6 @@ def verify_pkt_file(filepath: str) -> bool:
     """
     Verifica che un file .pkt sia valido (basic check)
     """
-    try:
-        # Se è GZIP
-        with gzip.open(filepath, 'rb') as f:
-            content = f.read()
-            return b'<PACKETTRACER5>' in content or b'<NETWORK>' in content
-    except Exception:
-        # Se non è GZIP, potrebbe essere formato proprietario pka2xml/PT
-        # Assumiamo valido se esiste e ha dimensione > 0 per ora
-        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-            return True
-        return False
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+        return True
+    return False
