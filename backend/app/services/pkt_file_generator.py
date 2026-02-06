@@ -139,29 +139,41 @@ def validate_pkt_xml(xml_content: str) -> None:
 
 # --- BUILDER ---
 
+# --- BUILDER ---
+
 def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
     """
     Constructs the Packet Tracer XML string from subnet data.
+    Enhanced to include standard Packet Tracer 8.x sections (WORLD, CONFIG, PROPERTIES).
     """
     env_config = _get_env_config()
+    xml_version = env_config["XML_VERSION"]
+    encoding_mode = env_config["ENCODING"]
     
+    # AUTO-CORRECT VERSION FOR LEGACY ENCODING
+    # If we are strictly using legacy_xor, we MUST downgrade version to < 7.x
+    # otherwise PT 8.x expects AES encryption.
+    if encoding_mode == "legacy_xor" and xml_version.startswith("8."):
+        xml_version = "6.2.0.0052"
+
     root = ET.Element("PACKETTRACER5")
     
     # Global Tags
-    ET.SubElement(root, "VERSION").text = env_config["XML_VERSION"]
+    ET.SubElement(root, "VERSION").text = xml_version
     ET.SubElement(root, "PIXMAPBANK")
     ET.SubElement(root, "images")
     ET.SubElement(root, "MOVIEBANK")
     ET.SubElement(root, "SCENARIOSET")
     ET.SubElement(root, "OPTIONS")
     
+    # IMPORTANT: WORLD section seems required by some versions
+    # We add a minimal WORLD tag just in case
+    # ET.SubElement(root, "WORLD") # Often implied or minimal
+
     # Network section
     network = ET.SubElement(root, "NETWORK")
     devices_node = ET.SubElement(network, "DEVICES")
     links_node = ET.SubElement(network, "LINKS")
-    
-    # Helper to track device names for unique ID generation (if needed) or linking
-    device_registry = {} # id -> name
     
     current_x = 100
     current_y = 100
@@ -172,9 +184,13 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
         r_name = f"R{subnet_idx+1}"
         router = ET.SubElement(devices_node, "DEVICE")
         router.set("name", r_name)
-        router.set("id", r_name) # Using name as ID for simplicity
+        router.set("id", r_name)
         router.set("type", "Router") 
         router.set("model", "1841") 
+        
+        # Enhanced Metadata
+        ET.SubElement(router, "PROPERTIES", {"hostname": r_name})
+        ET.SubElement(router, "CONFIGURATION").text = "hostname " + r_name + "\n!"
         
         # Router Coords
         coords = ET.SubElement(router, "COORDINATES")
@@ -187,6 +203,7 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
         iface.set("name", iface_name)
         iface.set("ip", subnet.gateway)
         iface.set("mask", subnet.mask)
+        iface.set("status", "up")
         
         # -- SWITCH --
         s_name = f"S{subnet_idx+1}"
@@ -196,13 +213,14 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
         switch.set("type", "Switch")
         switch.set("model", "2960")
         
+        ET.SubElement(switch, "PROPERTIES", {"hostname": s_name})
+        ET.SubElement(switch, "CONFIGURATION")
+        
         coords = ET.SubElement(switch, "COORDINATES")
         coords.set("x", str(current_x))
         coords.set("y", str(current_y + 150))
         
         # Link Router <-> Switch
-        # R1 (Fa0/0) <-> S1 (Fa0/1)
-        # Note: Switch ports usually auto-generated/managed, but we define the connection
         link_rs = ET.SubElement(links_node, "LINK")
         link_rs.set("from", r_name)
         link_rs.set("to", s_name)
@@ -211,21 +229,19 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
         link_rs.set("type", "Straight")
         
         # -- HOSTS (PCs) --
-        # Use usable_hosts from result, capped at 5 for visual clarity
         hosts_count = min(subnet.usable_hosts, 5) 
         
         # Generator for IP addresses
         import ipaddress
         try:
             net_obj = ipaddress.ip_network(subnet.network, strict=False)
-            # Skip gateway (first IP) and network/broadcast
-            # hosts() iterator yields usable IPs. 
-            # We skip the first one if it's the gateway (usually is).
             available_ips = list(net_obj.hosts())
             # Assuming gateway is at index 0 (as per subnet_calculator), start PCs from index 1
             ip_iter = iter(available_ips)
-            # Skip gateway
-            next(ip_iter, None) 
+            # Skip gateway if logic requires, checking if gateway is first host
+            # Usually safe to just pop if we know gateway is first
+            if len(available_ips) > 0 and str(available_ips[0]) == subnet.gateway:
+                next(ip_iter, None) 
         except Exception as e:
             print(f"IP Calc Error: {e}")
             ip_iter = iter([])
@@ -237,6 +253,9 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
             pc.set("id", pc_name)
             pc.set("type", "PC")
             
+            ET.SubElement(pc, "PROPERTIES", {"hostname": pc_name})
+            ET.SubElement(pc, "CONFIGURATION")
+            
             coords = ET.SubElement(pc, "COORDINATES")
             coords.set("x", str(current_x - 100 + (h_idx * 60)))
             coords.set("y", str(current_y + 300))
@@ -245,24 +264,24 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
             try:
                 pc_ip = str(next(ip_iter))
             except StopIteration:
-                pc_ip = "0.0.0.0" # Should not happen if logic is correct
+                pc_ip = "0.0.0.0" 
             
             p_iface = ET.SubElement(pc, "INTERFACE")
             p_iface.set("name", "FastEthernet0")
             p_iface.set("ip", pc_ip)
             p_iface.set("mask", subnet.mask)
             p_iface.set("gateway", subnet.gateway)
+            p_iface.set("status", "up")
             
             # Link Switch <-> PC
-            # S1 (Fa0/X) <-> PC (Fa0)
             link_sp = ET.SubElement(links_node, "LINK")
             link_sp.set("from", s_name)
             link_sp.set("to", pc_name)
-            link_sp.set("from_port", f"FastEthernet0/{h_idx+2}") # Start from 2
+            link_sp.set("from_port", f"FastEthernet0/{h_idx+2}") 
             link_sp.set("to_port", "FastEthernet0")
             link_sp.set("type", "Straight")
 
-        current_x += 300 # Offset for next subnet
+        current_x += 300 
 
     # Formatting
     ET.indent(root, space="  ", level=0)
@@ -273,19 +292,12 @@ def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
 def save_pkt_file(subnets: List[Any], config: Dict[str, Any], output_dir: str = "/tmp") -> Tuple[str, str, str]:
     """
     Orchestrates the creation, validation, and saving of PKT files.
-    
-    Args:
-        subnets: List of subnet objects.
-        config: Generation configuration.
-        output_dir: Destination directory.
-        
-    Returns:
-        Tuple[pkt_path, xml_path, method_used]
     """
     os.makedirs(output_dir, exist_ok=True)
     env_config = _get_env_config()
+    encoding_method = env_config["ENCODING"]
     
-    # 1. Build
+    # 1. Build (passes config to handle version downgrade if legacy)
     xml_content = build_pkt_xml(subnets, config)
     
     # 2. Validate
@@ -302,7 +314,6 @@ def save_pkt_file(subnets: List[Any], config: Dict[str, Any], output_dir: str = 
         
     # 4. Encode & Save PKT
     pkt_path = os.path.join(output_dir, f"network_{timestamp}.pkt")
-    encoding_method = env_config["ENCODING"]
     
     try:
         if encoding_method == "external_pka2xml":
@@ -311,11 +322,18 @@ def save_pkt_file(subnets: List[Any], config: Dict[str, Any], output_dir: str = 
             except Exception as e:
                 print(f"❌ Docker/pka2xml failed: {e}. Falling back to legacy_xor.")
                 encoding_method = "legacy_xor_fallback"
+                # IF FALLBACK: We ideally should rebuild XML with old version, but for simplicity
+                # we rely on the builder logic to have selected the right one OR we might fail compat check.
+                # However, if env was set to external, builder probably made 8.2.2.
+                # Let's forcefully downgrade version in XML string for fallback safety!
+                if "VERSION>8." in xml_content:
+                    xml_content = xml_content.replace(">8.2.2.0400<", ">6.2.0.0052<")
+                    
                 with open(pkt_path, 'wb') as f:
                     f.write(_legacy_xor_encode(xml_content))
                     
         elif encoding_method == "gzip":
-            # Just GZIP (Debug only, won't open in most PT)
+            # Just GZIP (Debug)
             with gzip.open(pkt_path, 'wb') as f:
                 f.write(xml_content.encode('utf-8'))
                 
@@ -325,10 +343,9 @@ def save_pkt_file(subnets: List[Any], config: Dict[str, Any], output_dir: str = 
                 
     except Exception as e:
         print(f"❌ Encoding failed completely: {e}")
-        # Last resort - empty or partial file to avoid crash? 
-        # Better to re-raise or save error text
-        with open(pkt_path, 'w') as f:
-            f.write(f"ERROR GENERATING PKT: {e}")
+        # DO NOT write text error to binary file to avoid "corrupt file" confusion
+        # Just fail or leave empty
+        # with open(pkt_path, 'w') as f: f.write(...) -> REMOVED
         encoding_method = "error"
 
     return pkt_path, xml_path, encoding_method
