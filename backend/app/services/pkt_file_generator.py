@@ -67,13 +67,32 @@ def _legacy_xor_decode(encoded_data: bytes) -> str:
     except Exception as e:
         raise ValueError(f"Failed to decompress legacy payload: {e}")
 
+import shutil
+
 def _run_pka2xml_container(input_path: str, output_path: str) -> None:
     """
-    Runs pka2xml inside a Docker container.
-    Requires 'pka2xml:latest' image and Docker availability.
+    Runs pka2xml to encrypt the file.
+    
+    Strategy 1: Direct Binary Execution (Production/Docker)
+    If `pka2xml` is installed in the system PATH (e.g., inside our Docker container),
+    we use it directly. This is the preferred method for deployment.
+    
+    Strategy 2: Docker-in-Docker / Host Execution (Dev/Windows)
+    If `pka2xml` binary is not found, we assume we are running on a host machine
+    that has Docker installed and try to run the `pka2xml:latest` image.
     """
     abs_input = os.path.abspath(input_path)
     abs_output = os.path.abspath(output_path)
+    
+    # Strategy 1: Check for local binary
+    if shutil.which("pka2xml"):
+        # print("🐳 Found local pka2xml binary. Executing directly...")
+        cmd = ["pka2xml", "-e", abs_input, abs_output]
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return
+
+    # Strategy 2: Fallback to Docker container usage
+    # print("🐳 Local pka2xml not found. Attempting Docker run...")
     work_dir = os.path.dirname(abs_input)
     input_file = os.path.basename(abs_input)
     output_file = os.path.basename(abs_output)
