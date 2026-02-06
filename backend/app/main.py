@@ -37,13 +37,26 @@ async def health_check():
         "version": "1.0.0"
     }
 
-@app.get("/api")
-async def root():
-    """Root endpoint"""
+@app.get("/api/pka2xml-status")
+def check_pka2xml():
+    """Check availability of pka2xml encoding tool"""
+    import shutil
+    import subprocess
+    pka_path = shutil.which("pka2xml")
+    
+    version_info = "Unknown"
+    if pka_path:
+        try:
+            # pka2xml might not offer --version via CLI easily but we can try running it
+            # or just confirm its presence
+            version_info = "Available (Binary found)"
+        except Exception:
+            pass
+            
     return {
-        "message": "Welcome to NetTrace API",
-        "docs": "/docs",
-        "health": "/api/health"
+        "available": bool(pka_path), 
+        "path": pka_path,
+        "details": version_info
     }
 
 # Import and include routers

@@ -92,11 +92,17 @@ async def generate_pkt_file(request: GenerateRequest):
         # save_pkt_file now handles XML building, validating, and encoding
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         
-        # We pass the full config config dump, though currently only subnets are used by the builder
-        pkt_path, xml_path, encoding_method = save_pkt_file(subnets, network_config.model_dump(), output_dir)
+        # New: save_pkt_file returns a dict with details
+        result = save_pkt_file(subnets, network_config.model_dump(), output_dir)
         
-        # Step 4: Verification is implicitly handled by save_pkt_file (logs warnings/errors)
-        is_valid = True if encoding_method != "error" else False
+        if not result["success"]:
+             raise Exception(result.get("error", "Unknown error"))
+             
+        pkt_path = result["pkt_path"]
+        xml_path = result["xml_path"]
+        encoding_method = result["encoding_used"]
+        file_size = result["file_size"]
+        pka2xml_avail = result["pka2xml_available"]
         
         # Generate download URLs
         pkt_filename = os.path.basename(pkt_path)
@@ -117,6 +123,9 @@ async def generate_pkt_file(request: GenerateRequest):
                 "pcs": network_config.devices.pcs,
                 "routing_protocol": network_config.routing_protocol.value
             },
+            # Extra info for client-side debugging
+            # Note: You might need to add 'encoding_info' to PktGenerateResponse schema if strict validation is on
+            # assuming schema allows extra fields or we pack it into message/summary for now
             subnets=[{
                 "name": s.name,
                 "network": s.network,

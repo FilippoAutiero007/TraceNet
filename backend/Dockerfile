@@ -1,40 +1,49 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
-WORKDIR /app
-
-# Install system dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
+    libcrypto++-dev \
+    libzip-dev \
     cmake \
+    libabsl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and build pka2xml
+RUN git clone https://github.com/mircodz/pka2xml.git /tmp/pka2xml \
+    && cd /tmp/pka2xml \
+    && make \
+    && cp pka2xml /usr/local/bin/ \
+    && chmod +x /usr/local/bin/pka2xml
+
+# Final stage
+FROM python:3.11-slim
+
+# Copy pka2xml from builder
+COPY --from=builder /usr/local/bin/pka2xml /usr/local/bin/
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
     libcrypto++-dev \
     libzip-dev \
     libre2-dev \
     zlib1g-dev \
-    pkg-config \
-    libabsl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pka2xml with system libraries (no source build needed)
-RUN git clone https://github.com/mircodz/pka2xml.git /tmp/pka2xml && \
-    cd /tmp/pka2xml && \
-    g++ -o pka2xml main.cpp \
-        -I/usr/include \
-        -L/usr/lib/x86_64-linux-gnu \
-        -lzip -lre2 -lcryptopp -lz -lpthread \
-        -std=c++17 && \
-    cp pka2xml /usr/local/bin/ && \
-    rm -rf /tmp/pka2xml
+WORKDIR /app
 
-# Install Python dependencies
+# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application
 COPY . .
 
-# Expose port
+# Create output directory
+RUN mkdir -p /tmp/tracenet
+
 EXPOSE 8001
 
-# Run command
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
