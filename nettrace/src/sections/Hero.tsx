@@ -10,7 +10,7 @@ export function Hero() {
     <section className="relative min-h-screen flex items-center justify-center bg-slate-950 overflow-hidden pt-16">
       {/* Background Grid Animation */}
       <div className="absolute inset-0 opacity-20">
-        <div 
+        <div
           className="absolute inset-0"
           style={{
             backgroundImage: `
@@ -51,24 +51,20 @@ export function Hero() {
           </div>
 
           {/* Main Heading */}
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold text-white mb-6 leading-tight">
-            Analizza i Pacchetti di Rete
-            <br />
-            <span className="bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
-              con Intelligenza Artificiale
-            </span>
+          <h1 className="text-7xl sm:text-8xl md:text-9xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-8 tracking-tighter filter drop-shadow-[0_0_30px_rgba(6,182,212,0.5)] animate-in fade-in zoom-in duration-1000">
+            NET TRACE
           </h1>
 
           {/* Subtitle */}
           <p className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-10">
-            NetTrace è lo strumento automatizzato per la tracciatura e l'analisi dei pacchetti di rete. 
+            NetTrace è lo strumento automatizzato per la tracciatura e l'analisi dei pacchetti di rete.
             Simula, traccia e analizza il comportamento dei pacchetti in reti complesse.
           </p>
 
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
             <SignUpButton mode="modal">
-              <Button 
+              <Button
                 size="lg"
                 className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg group"
                 onMouseEnter={() => setIsHovered(true)}
@@ -78,7 +74,7 @@ export function Hero() {
                 <ArrowRight className={`w-5 h-5 ml-2 transition-transform ${isHovered ? 'translate-x-1' : ''}`} />
               </Button>
             </SignUpButton>
-            <Button 
+            <Button
               size="lg"
               variant="outline"
               className="border-slate-700 text-slate-300 hover:bg-slate-800 px-8 py-6 text-lg"
