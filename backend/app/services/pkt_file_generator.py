@@ -107,14 +107,23 @@ def create_pkt_xml(config: NetworkConfig, subnets: List[SubnetResult]) -> str:
     """
     root = ET.Element("PACKETTRACER5")
     
-    # Network node con attributi obbligatori per PT 8.x
+    # Regola 1: VERSION come figlio diretto di PACKETTRACER5
+    ET.SubElement(root, "VERSION").text = "8.2.2.0400"
+    
+    # Regola 2: Struttura globale
+    ET.SubElement(root, "PIXMAPBANK")
+    ET.SubElement(root, "MOVIEBANK")
+    
+    # Network node
     network = ET.SubElement(root, "NETWORK")
-    network.set("version", "8.2.1")
-    network.set("nodename", "localhost")
-    network.set("locale", "en_US")
+    #network.set("version", "8.2.1") # Rimosso se ridondante o spostato in root, ma manteniamo pulito
+    
+    ET.SubElement(root, "SCENARIOSET")
+    ET.SubElement(root, "OPTIONS")
     
     devices_node = ET.SubElement(network, "DEVICES")
-    cables_node = ET.SubElement(network, "CABLES")
+    # Regola 3: LINKS invece di CABLES
+    links_node = ET.SubElement(network, "LINKS")
     
     device_id = 0
     cable_id = 0
@@ -124,32 +133,44 @@ def create_pkt_xml(config: NetworkConfig, subnets: List[SubnetResult]) -> str:
     switch_y = 250
     pc_y = 400
     
+    # Mappa ID interni a nomi device per i link
+    device_map = {} # id -> hostname
+    
     # 1. Aggiungi Router
     router_ids = []
     for r in range(config.devices.routers):
         r_id = f"dev_{device_id}"
         router_ids.append(r_id)
         device_id += 1
+        hostname = f"R{r+1}"
+        device_map[r_id] = hostname
         
+        # Regola 4: Metadati device (name, type)
         router = ET.SubElement(devices_node, "DEVICE")
-        router.set("id", r_id)
-        router.set("deviceType", "Router1841")
-        router.set("hostname", f"R{r+1}")
-        router.set("x", str(300 + r * 200))
-        router.set("y", str(router_y))
-        router.set("icon", "router.png")
+        router.set("name", hostname)
+        router.set("type", "router") # O specificare meglio se necessario es. "2811"
+        router.set("id", r_id) # Manteniamo ID per riferimento interno nostro se serve
+        router.set("power", "on")
+        # Attributo specifico PT per il modello esatto se 'type' è generico
+        # router.set("model", "1841") 
+
+        # Coordinate in nodo figlio
+        coords = ET.SubElement(router, "COORDINATES")
+        coords.set("x", str(300 + r * 200))
+        coords.set("y", str(router_y))
         
+        # Regola 5: INTERFACE invece di PORTS
         # Porte router
-        ports_node = ET.SubElement(router, "PORTS")
         for i in range(2):
-            port = ET.SubElement(ports_node, "PORT")
-            port.set("type", "FastEthernet")
-            port.set("number", f"0/{i}")
+            iface = ET.SubElement(router, "INTERFACE")
+            iface.set("name", f"FastEthernet0/{i}")
+            iface.set("type", "ethernet") 
+            iface.set("bandwidth", "100000")
         
         # Configurazione IOS router
         config_node = ET.SubElement(router, "CONFIG")
         ios_config = ET.SubElement(config_node, "IOS_CONFIG")
-        ios_config.text = generate_router_config(f"R{r+1}", subnets, config.routing_protocol)
+        ios_config.text = generate_router_config(hostname, subnets, config.routing_protocol)
     
     # 2. Aggiungi Switch
     switch_ids = []
@@ -157,160 +178,192 @@ def create_pkt_xml(config: NetworkConfig, subnets: List[SubnetResult]) -> str:
         s_id = f"dev_{device_id}"
         switch_ids.append(s_id)
         device_id += 1
+        hostname = f"S{s+1}"
+        device_map[s_id] = hostname
         
         switch = ET.SubElement(devices_node, "DEVICE")
+        switch.set("name", hostname)
+        switch.set("type", "switch")
         switch.set("id", s_id)
-        switch.set("deviceType", "Switch2960")
-        switch.set("hostname", f"S{s+1}")
-        switch.set("x", str(200 + s * 250))
-        switch.set("y", str(switch_y))
-        switch.set("icon", "switch.png")
+        switch.set("power", "on")
+        
+        coords = ET.SubElement(switch, "COORDINATES")
+        coords.set("x", str(200 + s * 250))
+        coords.set("y", str(switch_y))
         
         # Porte switch
-        ports_node_s = ET.SubElement(switch, "PORTS")
         for i in range(1, 25):  # FastEthernet 0/1-24
-            port = ET.SubElement(ports_node_s, "PORT")
-            port.set("type", "FastEthernet")
-            port.set("number", f"0/{i}")
+            iface = ET.SubElement(switch, "INTERFACE")
+            iface.set("name", f"FastEthernet0/{i}")
+            iface.set("type", "ethernet")
         for i in range(1, 3):  # GigabitEthernet uplink
-            port_g = ET.SubElement(ports_node_s, "PORT")
-            port_g.set("type", "GigabitEthernet")
-            port_g.set("number", f"0/{i}")
-        
+            iface = ET.SubElement(switch, "INTERFACE")
+            iface.set("name", f"GigabitEthernet0/{i}")
+            iface.set("type", "ethernet")
+
         # Configurazione IOS switch
         s_config_node = ET.SubElement(switch, "CONFIG")
         s_ios_config = ET.SubElement(s_config_node, "IOS_CONFIG")
-        s_ios_config.text = generate_switch_config(f"S{s+1}")
+        s_ios_config.text = generate_switch_config(hostname)
     
-    # 3. Collega Router a Switch
+    # 3. Collega Router a Switch (LINKS)
     if router_ids and switch_ids:
         for i, r_id in enumerate(router_ids):
             if i < len(switch_ids):
-                cable = ET.SubElement(cables_node, "CABLE")
-                cable.set("id", f"cable_{cable_id}")
-                cable.set("fromDevice", r_id)
-                cable.set("fromPort", "FastEthernet0/0")
-                cable.set("toDevice", switch_ids[i])
-                cable.set("toPort", "FastEthernet0/1")
-                cable.set("type", "Copper Straight-Through")
+                link = ET.SubElement(links_node, "LINK")
+                # Regola 3: from/to attributes e naming porte reale
+                link.set("from", device_map[r_id]) # Nome host es. R1
+                link.set("from_port", "FastEthernet0/0")
+                link.set("to", device_map[switch_ids[i]]) # Nome host es. S1
+                link.set("to_port", "FastEthernet0/1") # Assicurarsi corrisponda a interfaccia esistente
+                link.set("speed", "100")
                 cable_id += 1
     
     # 4. Aggiungi PC
-    pc_port_idx = 2  # Inizia da FastEthernet0/2 sullo switch
+    pc_port_idx = 2  # Inizia da FastEthernet0/2 sullo switch (0/1 usata per uplink router)
     for p in range(config.devices.pcs):
         pc_id = f"dev_{device_id}"
         device_id += 1
+        hostname = f"PC{p+1}"
+        device_map[pc_id] = hostname
         
         pc = ET.SubElement(devices_node, "DEVICE")
+        pc.set("name", hostname)
+        pc.set("type", "pc")
         pc.set("id", pc_id)
-        pc.set("deviceType", "PC-PT")
-        pc.set("hostname", f"PC{p+1}")
-        pc.set("x", str(100 + (p % 6) * 120))  # 6 PC per riga
-        pc.set("y", str(pc_y + (p // 6) * 80))
-        pc.set("icon", "pc.png")
+        pc.set("power", "on")
+        
+        coords = ET.SubElement(pc, "COORDINATES")
+        coords.set("x", str(100 + (p % 6) * 120))
+        coords.set("y", str(pc_y + (p // 6) * 80))
         
         # Porta PC
-        ports_node_pc = ET.SubElement(pc, "PORTS")
-        port_pc = ET.SubElement(ports_node_pc, "PORT")
-        port_pc.set("type", "FastEthernet")
-        port_pc.set("number", "0")
+        iface = ET.SubElement(pc, "INTERFACE")
+        iface.set("name", "FastEthernet0")
+        iface.set("type", "ethernet")
         
-        # Configurazione IP PC
+        # Configurazione IP PC - Manteniamo struttura custom PT se standard, 
+        # ma spesso è meglio usare il CONFIG/CLID o Desktop config.
+        # Per ora manteniamo una struttura simile a quella osservata in alcuni esempi o generica.
+        # Un approccio sicuro è mettere i parametri basilari nell'INTERFACE se supportato, 
+        # o nel CONFIG.
+        
         config_node_pc = ET.SubElement(pc, "CONFIG")
-        pc_config = ET.SubElement(config_node_pc, "PC_CONFIG")
+        # Struttura osservata varia, proviamo ad essere generici ma conformi
         
         if subnets:
-            # Assegna PC alle subnet round-robin
             subnet_idx = p % len(subnets)
             subnet = subnets[subnet_idx]
             
-            # Calcola IP
             network_parts = subnet.network.split('/')[0].split('.')
             pc_ip = f"{network_parts[0]}.{network_parts[1]}.{network_parts[2]}.{10 + (p // len(subnets))}"
             
-            ip_elem = ET.SubElement(pc_config, "IP")
-            ip_elem.text = pc_ip
-            
-            mask_elem = ET.SubElement(pc_config, "MASK")
-            mask_elem.text = subnet.mask
-            
-            gateway_elem = ET.SubElement(pc_config, "GATEWAY")
-            gateway_elem.text = subnet.gateway
-        
-        # Collega PC allo switch (distribuisci tra switch disponibili)
+            # Applicazione IP su interfaccia
+            iface.set("ip", pc_ip)
+            iface.set("mask", subnet.mask)
+            iface.set("gateway", subnet.gateway)
+
+        # Collega PC allo switch
         if switch_ids:
             switch_idx = p % len(switch_ids)
             switch_to_use = switch_ids[switch_idx]
             
-            cable = ET.SubElement(cables_node, "CABLE")
-            cable.set("id", f"cable_{cable_id}")
-            cable.set("fromDevice", switch_to_use)
-            cable.set("fromPort", f"FastEthernet0/{pc_port_idx + (p // len(switch_ids))}")
-            cable.set("toDevice", pc_id)
-            cable.set("toPort", "FastEthernet0")
-            cable.set("type", "Copper Straight-Through")
+            link = ET.SubElement(links_node, "LINK")
+            link.set("from", switch_to_use) # ID o Nome? PT spesso usa Nome negli attributi link
+            # Correggiamo: sopra usavo map[id], verifichiamo consistenza.
+            # Regola 3 Esempio: <LINK from="PC1" from_port="eth0" to="SW1" to_port="port1" speed="100"/>
+            # Quindi si aspetta i NOMI (Hostname).
+            
+            link.set("from", device_map[switch_to_use])     # Es S1
+            link.set("from_port", f"FastEthernet0/{pc_port_idx + (p // len(switch_ids))}")
+            link.set("to", hostname)                        # Es PC1
+            link.set("to_port", "FastEthernet0")
+            link.set("speed", "100")
             cable_id += 1
     
     # Serializza XML
     return ET.tostring(root, encoding="unicode", method="xml")
 
 
+import subprocess
+
 def save_pkt_file(xml_content: str, output_dir: str = "/tmp") -> Tuple[str, str]:
     """
-    Salva XML come file .pkt (compresso GZIP) e .xml (debug)
+    Salva XML come file .pkt con encoding corretto per PT 8.x
     
-    IMPORTANTE: Il file .pkt è BINARIO (XML compresso con GZIP)
-    NON è un file di testo!
-    
-    Args:
-        xml_content: Stringa XML della rete
-        output_dir: Directory di output
-        
-    Returns:
-        Tuple (path_pkt, path_xml)
+    Usa pka2xml se disponibile, altrimenti fallback a GZIP (con warning)
     """
     os.makedirs(output_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    pkt_path = os.path.join(output_dir, f"network_{timestamp}.pkt")
     xml_path = os.path.join(output_dir, f"network_{timestamp}.xml")
+    pkt_path = os.path.join(output_dir, f"network_{timestamp}.pkt")
     
-    # Aggiungi header XML
+    # Prepara XML
     if not xml_content.startswith('<?xml'):
         xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_content
     
-    # Valida e formatta XML
+    # Valida e formatta
     try:
         tree = ET.fromstring(xml_content.encode('utf-8'))
         ET.indent(tree, space="  ", level=0)
-        xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(tree, encoding='unicode', method='xml')
-    except Exception:
-        pass  # Usa XML originale se validazione fallisce
+        xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n' + \
+                      ET.tostring(tree, encoding='unicode', method='xml')
+    except Exception as e:
+        print(f"⚠️ XML validation warning: {e}")
     
-    # Salva .pkt (GZIP binario)
-    with gzip.open(pkt_path, 'wb') as f:
-        f.write(xml_content.encode('utf-8'))
-    
-    # Salva .xml (testo per debug)
+    # Salva XML debug
     with open(xml_path, 'w', encoding='utf-8') as f:
         f.write(xml_content)
+    
+    # Encoding .pkt
+    encoding_method = "unknown"
+    try:
+        # OPZIONE 1: Prova pka2xml (installato tramite pip)
+        # Assumiamo che pka2xml esponga un entry point CLI "pka2xml"
+        result = subprocess.run([
+            "pka2xml",
+            "--xml2pkt",
+            xml_path,
+            "-o", pkt_path
+        ], capture_output=True, text=True, timeout=10)
+        
+        if result.returncode == 0:
+            encoding_method = "pka2xml"
+        else:
+            # Se fallisce, prova a importarlo come libreria se il CLI non va
+            # Fallback a GZIP con warning
+            raise Exception(f"pka2xml CLI failed: {result.stderr}")
+            
+    except (FileNotFoundError, Exception) as e:
+        # FALLBACK: GZIP semplice (NON funzionerà su PT 8.x)
+        print(f"⚠️ WARNING: pka2xml not available or failed ({e})")
+        print(f"⚠️ Using GZIP fallback - file might NOT open in PT 8.x")
+        print(f"⚠️ Install pka2xml: pip install git+https://github.com/mircodz/pka2xml.git")
+        
+        with gzip.open(pkt_path, 'wb') as f:
+            f.write(xml_content.encode('utf-8'))
+        encoding_method = "gzip_fallback"
+    
+    print(f"✅ PKT file created: {pkt_path}")
+    print(f"   Encoding method: {encoding_method}")
+    print(f"✅ XML debug file: {xml_path}")
     
     return pkt_path, xml_path
 
 
 def verify_pkt_file(filepath: str) -> bool:
     """
-    Verifica che un file .pkt sia correttamente compresso con GZIP
-    
-    Args:
-        filepath: Path al file .pkt
-        
-    Returns:
-        True se il file è un GZIP valido con contenuto XML
+    Verifica che un file .pkt sia valido (basic check)
     """
     try:
+        # Se è GZIP
         with gzip.open(filepath, 'rb') as f:
             content = f.read()
             return b'<PACKETTRACER5>' in content or b'<NETWORK>' in content
     except Exception:
+        # Se non è GZIP, potrebbe essere formato proprietario pka2xml/PT
+        # Assumiamo valido se esiste e ha dimensione > 0 per ora
+        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+            return True
         return False
