@@ -2,35 +2,27 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies including static libraries
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
+    cmake \
     libcrypto++-dev \
     libzip-dev \
     libre2-dev \
     zlib1g-dev \
+    pkg-config \
+    libabsl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Build and install RE2 from source (static library)
-RUN git clone https://github.com/google/re2.git /tmp/re2 && \
-    cd /tmp/re2 && \
-    make && \
-    make install && \
-    rm -rf /tmp/re2
-
-# Build and install Crypto++ from source (static library)
-RUN git clone https://github.com/weidai11/cryptopp.git /tmp/cryptopp && \
-    cd /tmp/cryptopp && \
-    make static && \
-    make install && \
-    rm -rf /tmp/cryptopp
-
-# Install pka2xml with dynamic linking (simpler, works with installed libs)
+# Install pka2xml with system libraries (no source build needed)
 RUN git clone https://github.com/mircodz/pka2xml.git /tmp/pka2xml && \
     cd /tmp/pka2xml && \
-    sed -i 's/pka2xml-static/pka2xml-dynamic/' Makefile && \
-    make pka2xml-dynamic && \
+    g++ -o pka2xml main.cpp \
+        -I/usr/include \
+        -L/usr/lib/x86_64-linux-gnu \
+        -lzip -lre2 -lcryptopp -lz -lpthread \
+        -std=c++17 && \
     cp pka2xml /usr/local/bin/ && \
     rm -rf /tmp/pka2xml
 
