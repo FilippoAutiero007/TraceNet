@@ -8,7 +8,7 @@ from app.models.schemas import GenerateRequest, GenerateResponse, PktGenerateReq
 from app.services.nlp_parser import parse_network_description
 from app.services.subnet_calculator import calculate_vlsm
 from app.services.pkt_generator import generate_cisco_config
-from app.services.pkt_file_generator import create_pkt_xml, save_pkt_file, verify_pkt_file
+from app.services.pkt_file_generator import save_pkt_file
 import os
 
 router = APIRouter(tags=["generate"])
@@ -88,15 +88,15 @@ async def generate_pkt_file(request: GenerateRequest):
             network_config.subnets
         )
         
-        # Step 3: Generate Packet Tracer XML
-        xml_content = create_pkt_xml(network_config, subnets)
-        
-        # Step 4: Save as .pkt (GZIP) and .xml (debug)
+        # Step 3: Generate and Save Packet Tracer File
+        # save_pkt_file now handles XML building, validating, and encoding
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-        pkt_path, xml_path = save_pkt_file(xml_content, output_dir)
         
-        # Step 5: Verify .pkt file is valid GZIP
-        is_valid = verify_pkt_file(pkt_path)
+        # We pass the full config config dump, though currently only subnets are used by the builder
+        pkt_path, xml_path, encoding_method = save_pkt_file(subnets, network_config.model_dump(), output_dir)
+        
+        # Step 4: Verification is implicitly handled by save_pkt_file (logs warnings/errors)
+        is_valid = True if encoding_method != "error" else False
         
         # Generate download URLs
         pkt_filename = os.path.basename(pkt_path)
@@ -104,7 +104,7 @@ async def generate_pkt_file(request: GenerateRequest):
         
         return PktGenerateResponse(
             success=True,
-            message=f"✅ File .pkt generato con successo! (GZIP valid: {is_valid})",
+            message=f"✅ File .pkt generato con successo! (Encoding: {encoding_method})",
             pkt_path=pkt_path,
             xml_path=xml_path,
             pkt_download_url=f"/api/download/{pkt_filename}",
