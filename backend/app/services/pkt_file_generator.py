@@ -108,7 +108,8 @@ def create_pkt_xml(config: NetworkConfig, subnets: List[SubnetResult]) -> str:
     root = ET.Element("PACKETTRACER5")
     
     # Regola 1: VERSION come figlio diretto di PACKETTRACER5
-    ET.SubElement(root, "VERSION").text = "8.2.2.0400"
+    # Usa versione 6.x per compatibilità con l'encoding Legacy (XOR)
+    ET.SubElement(root, "VERSION").text = "6.0.1.0000"
     
     # Regola 2: Struttura globale
     ET.SubElement(root, "PIXMAPBANK")
