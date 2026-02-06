@@ -9,7 +9,7 @@ from typing import Tuple, List, Dict, Any, Optional
 
 # --- CONFIGURATION ---
 DEFAULT_XML_VERSION = "8.2.2.0400"  # Default for modern PT
-DEFAULT_ENCODING = "legacy_xor"     # Options: legacy_xor, external_pka2xml, gzip
+DEFAULT_ENCODING = "external_pka2xml"     # Options: legacy_xor, external_pka2xml, gzip
 
 def _get_env_config():
     return {
