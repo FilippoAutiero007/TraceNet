@@ -1,65 +1,46 @@
-# Dockerfile per TraceNet - Fix dipendenze RE2/Abseil
+# Dockerfile per TraceNet Backend - Python FastAPI
 
-FROM ubuntu:22.04
+FROM python:3.11-slim
 
-# Evita prompt interattivi durante l'installazione
+# Evita prompt interattivi
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Aggiorna il sistema e installa dipendenze di base
+# Variabili d'ambiente per Python
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Aggiorna sistema e installa dipendenze di sistema
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y \
     build-essential \
-    cmake \
     git \
     wget \
-    pkg-config \
-    libssl-dev \
-    zlib1g-dev
-
-# Installa dipendenze RE2/Abseil compatibili (FIX PRINCIPALE)
-RUN apt-get install -y \
-    libabsl-dev \
-    libre2-dev \
-    libgtest-dev \
-    libbenchmark-dev \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libgrpc++-dev \
-    libgrpc-dev
-
-# Installa librerie per compressione .pkt
-RUN apt-get install -y \
-    libbz2-dev \
-    libxml2-dev \
-    libxml2-utils
-
-# Installa Node.js per il frontend (se necessario)
-RUN apt-get install -y \
-    nodejs \
-    npm
-
-# Pulizia cache apt
-RUN apt-get clean && \
+    curl \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Imposta directory di lavoro
+# Crea directory di lavoro
 WORKDIR /app
 
-# Copia i file del progetto
-COPY . /app
+# Copia requirements prima (per cache Docker)
+COPY requirements.txt /app/
 
-# Configura CMake con le opzioni corrette per RE2
-RUN cmake -DRE2_TEST=ON \
-          -DRE2_BENCHMARK=ON \
-          -DRE2_USE_ICU=ON \
-          -DCMAKE_BUILD_TYPE=Release \
-          -S . -B build
+# Installa dipendenze Python
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Compila il progetto
-RUN cmake --build build -j$(nproc)
+# Copia il codice dell'applicazione
+COPY . /app/
 
-# Esponi le porte necessarie (modifica secondo necessità)
-EXPOSE 8080 3000
+# Crea directory per output files
+RUN mkdir -p /tmp/tracenet
 
-# Comando di avvio
-CMD ["./build/tracenet"]
+# Esponi porta API
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Comando di avvio con Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
