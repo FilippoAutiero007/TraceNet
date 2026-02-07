@@ -1,49 +1,65 @@
-FROM python:3.11-slim AS builder
+# Dockerfile per TraceNet - Fix dipendenze RE2/Abseil
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    git \
+FROM ubuntu:22.04
+
+# Evita prompt interattivi durante l'installazione
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Aggiorna il sistema e installa dipendenze di base
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y \
     build-essential \
-    libcrypto++-dev \
-    libzip-dev \
     cmake \
-    libabsl-dev \
+    git \
+    wget \
     pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+    libssl-dev \
+    zlib1g-dev
 
-# Clone and build pka2xml
-RUN git clone https://github.com/mircodz/pka2xml.git /tmp/pka2xml \
-    && cd /tmp/pka2xml \
-    && make \
-    && cp pka2xml /usr/local/bin/ \
-    && chmod +x /usr/local/bin/pka2xml
-
-# Final stage
-FROM python:3.11-slim
-
-# Copy pka2xml from builder
-COPY --from=builder /usr/local/bin/pka2xml /usr/local/bin/
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libcrypto++-dev \
-    libzip-dev \
+# Installa dipendenze RE2/Abseil compatibili (FIX PRINCIPALE)
+RUN apt-get install -y \
+    libabsl-dev \
     libre2-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libgtest-dev \
+    libbenchmark-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    libgrpc++-dev \
+    libgrpc-dev
 
+# Installa librerie per compressione .pkt
+RUN apt-get install -y \
+    libbz2-dev \
+    libxml2-dev \
+    libxml2-utils
+
+# Installa Node.js per il frontend (se necessario)
+RUN apt-get install -y \
+    nodejs \
+    npm
+
+# Pulizia cache apt
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Imposta directory di lavoro
 WORKDIR /app
 
-# Copy requirements and install
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copia i file del progetto
+COPY . /app
 
-# Copy application
-COPY . .
+# Configura CMake con le opzioni corrette per RE2
+RUN cmake -DRE2_TEST=ON \
+          -DRE2_BENCHMARK=ON \
+          -DRE2_USE_ICU=ON \
+          -DCMAKE_BUILD_TYPE=Release \
+          -S . -B build
 
-# Create output directory
-RUN mkdir -p /tmp/tracenet
+# Compila il progetto
+RUN cmake --build build -j$(nproc)
 
-EXPOSE 8001
+# Esponi le porte necessarie (modifica secondo necessità)
+EXPOSE 8080 3000
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
+# Comando di avvio
+CMD ["./build/tracenet"]
