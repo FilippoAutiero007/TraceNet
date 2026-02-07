@@ -1,7 +1,6 @@
 """
 Generate router - API endpoints for network generation and .pkt file download
 """
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from app.models.schemas import GenerateRequest, GenerateResponse, PktGenerateRequest, PktGenerateResponse
@@ -10,9 +9,12 @@ from app.services.subnet_calculator import calculate_vlsm
 from app.services.pkt_generator import generate_cisco_config
 from app.services.pkt_file_generator import save_pkt_file
 import os
+from threading import Lock
+
+# Global lock per proteggere generazione file .pkt (FIX B2: previene race condition)
+_pkt_generation_lock = Lock()
 
 router = APIRouter(tags=["generate"])
-
 
 @router.post("/generate", response_model=GenerateResponse)
 async def generate_network(request: GenerateRequest):
@@ -59,17 +61,16 @@ async def generate_network(request: GenerateRequest):
             error=f"Generation failed: {str(e)}"
         )
 
-
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
 async def generate_pkt_file(request: GenerateRequest):
     """
     Generate Cisco Packet Tracer .pkt file from natural language description.
     
     Returns:
-        - pkt_path: Path to download the .pkt file
-        - xml_path: Path to download the debug .xml file
-        - download_url: URL to download the .pkt file
-        
+    - pkt_path: Path to download the .pkt file
+    - xml_path: Path to download the debug .xml file
+    - download_url: URL to download the .pkt file
+    
     Note: .pkt files are BINARY (XML compressed with GZIP), not text files!
     """
     try:
@@ -89,15 +90,16 @@ async def generate_pkt_file(request: GenerateRequest):
         )
         
         # Step 3: Generate and Save Packet Tracer File
-        # save_pkt_file now handles XML building, validating, and encoding
+        # FIX B2: Lock per evitare race condition su scrittura file concorrente
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         
-        # New: save_pkt_file returns a dict with details
-        result = save_pkt_file(subnets, network_config.model_dump(), output_dir)
+        with _pkt_generation_lock:
+            # Protegge save_pkt_file da accessi concorrenti
+            result = save_pkt_file(subnets, network_config.model_dump(), output_dir)
         
         if not result["success"]:
-             raise Exception(result.get("error", "Unknown error"))
-             
+            raise Exception(result.get("error", "Unknown error"))
+        
         pkt_path = result["pkt_path"]
         xml_path = result["xml_path"]
         encoding_method = result["encoding_used"]
@@ -123,9 +125,6 @@ async def generate_pkt_file(request: GenerateRequest):
                 "pcs": network_config.devices.pcs,
                 "routing_protocol": network_config.routing_protocol.value
             },
-            # Extra info for client-side debugging
-            # Note: You might need to add 'encoding_info' to PktGenerateResponse schema if strict validation is on
-            # assuming schema allows extra fields or we pack it into message/summary for now
             subnets=[{
                 "name": s.name,
                 "network": s.network,
@@ -144,7 +143,6 @@ async def generate_pkt_file(request: GenerateRequest):
             success=False,
             error=f"PKT generation failed: {str(e)}"
         )
-
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):
@@ -173,7 +171,6 @@ async def download_file(filename: str):
         media_type=media_type,
         filename=filename
     )
-
 
 @router.get("/templates")
 async def get_templates():
