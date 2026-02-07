@@ -14,8 +14,8 @@ python-multipart==0.0.6
 # Network/IP Handling
 ipaddress
 
-# HTTP Client
-httpx==0.26.0
+# HTTP Client (FIX: versione compatibile con mistralai)
+httpx>=0.27.0,<0.28.0
 
 # Testing
 pytest==7.4.3
