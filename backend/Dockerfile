@@ -27,7 +27,7 @@ COPY requirements.txt /app/
 
 # Installa dipendenze Python
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 # Copia il codice dell'applicazione
 COPY . /app/
