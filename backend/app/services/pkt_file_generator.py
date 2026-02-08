@@ -1,3 +1,4 @@
+import struct
 """
 PKT File Generator Service - Creates Cisco Packet Tracer 8.x compatible files
 
@@ -83,7 +84,7 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
     
     # Generate timestamped filenames with unique identifier to prevent race conditions
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_id = str(uuid.uuid4())[:8]  # Add 8-character unique identifier
+    unique_id = str(uuid.uuid4())[:8]
     pkt_path = os.path.join(output_dir, f"network_{timestamp}_{unique_id}.pkt")
     xml_path = os.path.join(output_dir, f"network_{timestamp}_{unique_id}.xml")
     
@@ -93,7 +94,6 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
     
     try:
         # STEP 1: Build XML structure
-        # Reference: pkt_xml_builder.py - build_pkt_xml()
         logger.info(f"📝 Step 1: Building XML structure...")
         xml_content = build_pkt_xml(subnets, config)
         logger.info(f"✅ XML structure built ({len(xml_content)} bytes)")
@@ -104,7 +104,7 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
             f.write(xml_content)
         logger.info(f"✅ Debug XML saved: {xml_path}")
         
-        # STEP 3: Validate XML before encryption (optional)
+        # STEP 3: Validate XML before encryption
         try:
             import xml.etree.ElementTree as ET
             ET.fromstring(xml_content)
@@ -113,8 +113,6 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
             logger.warning(f"⚠️ XML Validation Warning: {e}")
         
         # STEP 4: Encrypt XML data
-        # Reference: pkt_crypto.py - encrypt_pkt_data()
-        # Uses Unpacket's Twofish/EAX implementation
         logger.info(f"🔐 Step 4: Encrypting with Twofish/EAX...")
         xml_bytes = xml_content.encode('utf-8')
         encrypted_data = encrypt_pkt_data(xml_bytes)
@@ -125,9 +123,19 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
         is_valid, validation_msg = validate_encryption(xml_bytes)
         logger.info(f"   {validation_msg}")
         
-        # STEP 6: Write .pkt file
-        logger.info(f"💾 Step 6: Writing .pkt file...")
+        # STEP 6: Create PKT5 header
+        logger.info(f"📦 Step 6: Creating PKT5 header...")
+        magic = b'PKT5'
+        version = struct.pack('<HHHH', 8, 2, 2, 400)
+        header_size = 512
+        padding = b'\x00' * (header_size - len(magic) - len(version))
+        pkt_header = magic + version + padding
+        logger.info(f"✅ PKT5 header created: {len(pkt_header)} bytes")
+        
+        # STEP 7: Write .pkt file with header
+        logger.info(f"💾 Step 7: Writing .pkt file...")
         with open(pkt_path, 'wb') as f:
+            f.write(pkt_header)
             f.write(encrypted_data)
         
         file_size = os.path.getsize(pkt_path)
@@ -142,10 +150,10 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
             "success": True,
             "pkt_path": pkt_path,
             "xml_path": xml_path,
-            "encoding_used": "twofish_eax",  # Using proper encryption now
+            "encoding_used": "twofish_eax",
             "file_size": file_size,
             "validation": validation_msg,
-            "pka2xml_available": False  # We're using pure Python implementation
+            "pka2xml_available": False
         }
         
     except Exception as e:
