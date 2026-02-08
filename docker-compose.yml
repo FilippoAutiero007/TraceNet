@@ -7,18 +7,29 @@ services:
       - "8000:8000"
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - DATABASE_URL=${DATABASE_URL}
+      - ALLOWED_ORIGINS=http://localhost:5173
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/nettrace
       - ENVIRONMENT=development
+      - OUTPUT_DIR=/tmp/tracenet
+      - LOG_LEVEL=INFO
     volumes:
       - ./backend:/app
+      - /app/__pycache__  # Prevent cache conflicts
+    depends_on:
+      - postgres
     restart: unless-stopped
 
-  frontend:
-    build: ./frontend
+  nettrace:
+    build: 
+      context: ./nettrace
+      dockerfile: Dockerfile.dev
     ports:
-      - "3000:3000"
+      - "5173:5173"
     environment:
-      - REACT_APP_BACKEND_URL=http://localhost:8000
+      - VITE_API_URL=http://backend:8000
+    volumes:
+      - ./nettrace:/app
+      - /app/node_modules  # Prevent node_modules conflicts
     depends_on:
       - backend
     restart: unless-stopped
@@ -26,13 +37,14 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=nettrace
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-nettrace}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    restart: unless-stopped
 
 volumes:
   postgres_data:

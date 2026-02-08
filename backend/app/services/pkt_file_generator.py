@@ -25,6 +25,7 @@ Key improvements over original implementation:
 
 import os
 import logging
+import uuid
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -80,10 +81,11 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
     
     os.makedirs(output_dir, exist_ok=True)
     
-    # Generate timestamped filenames
+    # Generate timestamped filenames with unique identifier to prevent race conditions
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    pkt_path = os.path.join(output_dir, f"network_{timestamp}.pkt")
-    xml_path = os.path.join(output_dir, f"network_{timestamp}.xml")
+    unique_id = str(uuid.uuid4())[:8]  # Add 8-character unique identifier
+    pkt_path = os.path.join(output_dir, f"network_{timestamp}_{unique_id}.pkt")
+    xml_path = os.path.join(output_dir, f"network_{timestamp}_{unique_id}.xml")
     
     logger.info(f"🔧 PKT Generation Started")
     logger.info(f"   Output path: {pkt_path}")

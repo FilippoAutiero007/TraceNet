@@ -1,11 +1,17 @@
-"""
+"""                                                                                                    
 NLP Parser Service - Uses Mistral AI to parse natural language network descriptions
 """
 
 import os
 import json
+import logging
 from mistralai import Mistral
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import httpx
 from app.models.schemas import NetworkConfig, SubnetRequest, DeviceConfig, RoutingProtocol
+from app.utils.cache import response_cache
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a network configuration parser. Extract structured data from natural language network descriptions.
 
@@ -35,15 +41,25 @@ Output: {"base_network":"192.168.0.0/16","subnets":[{"name":"Sales","required_ho
 Input: "Network with 3 buildings: A (100 hosts), B (50 hosts), C (25 hosts)"
 Output: {"base_network":"192.168.0.0/16","subnets":[{"name":"Building_A","required_hosts":100},{"name":"Building_B","required_hosts":50},{"name":"Building_C","required_hosts":25}],"devices":{"routers":3,"switches":3,"pcs":175},"routing_protocol":"static"}"""
 
+@retry(
+    retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException, Exception)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True
+)
 async def parse_network_description(description: str) -> NetworkConfig | None:
     """
     Parse natural language network description using Mistral AI.
+    Includes automatic retry with exponential backoff for transient failures.
     
     Args:
         description: Natural language description of the network
         
     Returns:
         NetworkConfig object or None if parsing fails
+        
+    Raises:
+        ValueError: If API key is not configured or parsing fails
     """
     api_key = os.environ.get("MISTRAL_API_KEY")
     
@@ -53,6 +69,8 @@ async def parse_network_description(description: str) -> NetworkConfig | None:
     client = Mistral(api_key=api_key)
     
     try:
+        logger.info(f"Parsing network description: {description[:50]}...")
+        
         response = client.chat.complete(
             model="mistral-small-latest",
             messages=[
@@ -65,6 +83,8 @@ async def parse_network_description(description: str) -> NetworkConfig | None:
         
         content = response.choices[0].message.content
         data = json.loads(content)
+        
+        logger.info("Successfully parsed network description")
         
         # Build NetworkConfig from parsed data
         subnets = [
@@ -95,14 +115,32 @@ async def parse_network_description(description: str) -> NetworkConfig | None:
         else:
             protocol = RoutingProtocol.STATIC
         
-        return NetworkConfig(
+        result = NetworkConfig(
             base_network=data.get("base_network", "192.168.0.0/16"),
             subnets=subnets,
             devices=devices,
             routing_protocol=protocol
         )
         
+        # Cache result before returning
+        result_dict = result.model_dump()
+        response_cache.set(description, result_dict)
+        logger.info(f"Cached parse result (cache size: {response_cache.size()})")
+        
+        return result
+        
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse LLM response as JSON: {e}")
+        logger.error(f"Failed to parse LLM response as JSON: {e}")
+        raise ValueError(f"AI returned invalid JSON: {e}")
+    except httpx.TimeoutException as e:
+        logger.error(f"Mistral API timeout: {e}")
+        raise ValueError("AI service timeout. Please try again.")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            logger.error("Mistral API rate limit exceeded")
+            raise ValueError("AI service rate limit exceeded. Please wait a moment.")
+        logger.error(f"Mistral API HTTP error: {e}")
+        raise ValueError(f"AI service error: {e.response.status_code}")
     except Exception as e:
-        raise ValueError(f"LLM parsing failed: {e}")
+        logger.error(f"Unexpected error during LLM parsing: {e}", exc_info=True)
+        raise ValueError(f"Failed to parse network description: {str(e)}")

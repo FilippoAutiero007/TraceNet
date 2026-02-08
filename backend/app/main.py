@@ -7,8 +7,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
+from app.utils.logger import setup_logger
 
 load_dotenv()
+
+# Configure logging on startup
+log_level = os.getenv("LOG_LEVEL", "INFO")
+logger = setup_logger("tracenet", log_level)
 
 app = FastAPI(
     title="NetTrace API",
@@ -16,15 +21,26 @@ app = FastAPI(
     version="1.0.0"
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Log application startup"""
+    logger.info("TraceNet API starting up", extra={
+        "environment": os.getenv("ENVIRONMENT", "development"),
+        "log_level": log_level
+    })
+
 # CORS middleware for frontend
-# CORS middleware for frontend
-origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Allow localhost for dev + Vercel production/preview domains
+origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,https://tracenet.vercel.app,https://tracenet-git-*.vercel.app"
+).split(",")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
