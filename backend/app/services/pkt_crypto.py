@@ -178,7 +178,7 @@ def decrypt_pkt_data(pkt_data: bytes) -> bytes:
     
     # Stage 1: Deobfuscation (reverse of obf_stage1)
     L = len(pkt_data)
-    stage1 = bytes(pkt_data[L-1-i] ^ (L - i*L & 0xFF) for i in range(L))
+    stage1 = bytes(pkt_data[L-1-i] ^ ((L - i*L) & 0xFF) for i in range(L))
     
     # Stage 2: Decryption (Twofish/EAX)
     tf = Twofish(KEY)
