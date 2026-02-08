@@ -151,8 +151,65 @@ curl -X POST http://localhost:8001/api/generate-pkt \
 #### Download File
 
 ```bash
-curl -O http://localhost:8001/api/download/network_20250206_153000.pkt
+curl -O http://localhost:8000/api/download/network_20250206_153000.pkt
 ```
+
+## 🌐 Deployment Architecture
+
+### Production Setup
+
+TraceNet uses a modern separated architecture optimized for scalability:
+
+```
+┌─────────────────────────────────────────┐
+│ Vercel Edge Network                     │
+│ (Frontend - React + TypeScript)         │
+│ https://tracenet.vercel.app             │
+└────────────────┬────────────────────────┘
+                 │
+                 │ HTTPS API Calls
+                 │ (CORS Protected)
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│ Render Cloud                            │
+│ (Backend - FastAPI + Docker)            │
+│ https://tracenet-api.onrender.com       │
+└────────────────┬────────────────────────┘
+                 │
+                 │ PostgreSQL
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│ Render PostgreSQL                       │
+│ (Database - Managed Service)            │
+└─────────────────────────────────────────┘
+```
+
+### Environment Variables
+
+**Backend (Render):**
+```bash
+MISTRAL_API_KEY=sk-...
+ALLOWED_ORIGINS=https://tracenet.vercel.app,https://tracenet-git-*.vercel.app
+DATABASE_URL=postgresql://...
+ENVIRONMENT=production
+OUTPUT_DIR=/tmp/tracenet
+LOG_LEVEL=INFO
+```
+
+**Frontend (Vercel):**
+```bash
+VITE_API_URL=https://tracenet-api.onrender.com
+```
+
+### Why This Architecture?
+
+✅ **Independent Scaling**: Frontend and backend scale separately  
+✅ **Optimized Hosting**: Vercel CDN for frontend, Render containers for backend  
+✅ **Cost Effective**: Both offer generous free tiers  
+✅ **Fast Deploys**: Git push triggers automatic deployment  
+✅ **Better DX**: Frontend hot-reload without backend restart
 
 ## 🎯 Template Predefiniti
 
