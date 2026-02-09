@@ -1,6 +1,16 @@
 """
 PKT Crypto Service - Handles encryption/decryption of Cisco Packet Tracer files
 
+NOTE - IMPORTANT:
+Queste funzioni di cifratura (Twofish/EAX) NON sono usate per i file .pkt destinati a Cisco Packet Tracer
+quando ptexplorer è disponibile. Packet Tracer utilizza un proprio formato/procedura di codifica gestito
+tramite ptexplorer (backend/ptexplorer.py).
+
+Manteniamo queste funzioni solo per:
+- Fallback quando ptexplorer non è disponibile
+- Eventuali formati interni / backup cifrati
+- Testing e validazione
+
 This module provides cryptographic functions for generating valid .pkt files
 that can be opened in Cisco Packet Tracer 8.x and later versions.
 
@@ -107,6 +117,9 @@ def obf_stage1(data: bytes) -> bytes:
 def encrypt_pkt_data(xml_data: bytes) -> bytes:
     """
     Encrypts XML data using the complete Packet Tracer encryption pipeline.
+    
+    NOTE: This function is only used as FALLBACK when ptexplorer is not available.
+    Prefer using ptexplorer (backend/ptexplorer.py) for production PKT file generation.
     
     This function implements the full 4-stage encryption process used by
     Cisco Packet Tracer for .pkt and .pka files.
@@ -222,7 +235,7 @@ def validate_encryption(xml_data: bytes) -> Tuple[bool, str]:
         
         # Verify
         if decrypted == xml_data:
-            return True, "✅ Encryption validation successful"
+            return True, "✅ Encryption validation successful (fallback method)"
         else:
             return False, "❌ Decrypted data does not match original"
             
