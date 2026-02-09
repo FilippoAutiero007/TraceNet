@@ -26,3 +26,6 @@ python-json-logger==2.0.7
 
 # Retry Logic
 tenacity==8.2.3
+
+# Packet Tracer PKT Generation
+ptexplorer
