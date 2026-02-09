@@ -27,5 +27,4 @@ python-json-logger==2.0.7
 # Retry Logic
 tenacity==8.2.3
 
-# Packet Tracer PKT Generation
-ptexplorer
+# Note: ptexplorer is a custom module in backend/ptexplorer.py (not a PyPI package)
