@@ -48,6 +48,7 @@ logs/
 
 # Application specific
 *.pkt
+!backend/templates/*.pkt
 *.xml
 /tmp/
 /test_output*/
