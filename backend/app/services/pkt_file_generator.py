@@ -8,7 +8,7 @@ in Cisco Packet Tracer 8.x and later versions.
 Process:
 1. Build XML structure (using pkt_xml_builder.py)
 2. Encrypt XML data (using pkt_crypto.py)
-3. Write final .pkt file
+3. Write final .pkt file (PT 8.2.2: entire file encrypted, no plaintext header)
 4. Validate roundtrip encryption (optional)
 
 References:
@@ -22,6 +22,7 @@ Key improvements over original implementation:
 - Generates PT 8.x compatible XML structure
 - Includes validation of encryption pipeline
 - Full documentation of cryptographic process
+- PT 8.2.2 format: no plaintext PKT5 header (entire file encrypted)
 """
 
 import os
@@ -123,19 +124,11 @@ def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_di
         is_valid, validation_msg = validate_encryption(xml_bytes)
         logger.info(f"   {validation_msg}")
         
-        # STEP 6: Create PKT5 header
-        logger.info(f"📦 Step 6: Creating PKT5 header...")
-        magic = b'PKT5'
-        version = struct.pack('<HHHH', 8, 2, 2, 400)
-        header_size = 512
-        padding = b'\x00' * (header_size - len(magic) - len(version))
-        pkt_header = magic + version + padding
-        logger.info(f"✅ PKT5 header created: {len(pkt_header)} bytes")
-        
-        # STEP 7: Write .pkt file with header
-        logger.info(f"💾 Step 7: Writing .pkt file...")
+        # STEP 6: Write .pkt file (PT 8.2.2 format - no plaintext header)
+        logger.info(f"💾 Step 6: Writing .pkt file...")
+        # PT 8.2.2 encrypts the ENTIRE file including the PKT5 header
+        # The <PACKETTRACER5> XML tag is inside the encrypted data, not a separate plaintext header
         with open(pkt_path, 'wb') as f:
-            f.write(pkt_header)
             f.write(encrypted_data)
         
         file_size = os.path.getsize(pkt_path)

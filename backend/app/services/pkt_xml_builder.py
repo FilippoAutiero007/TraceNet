@@ -1,360 +1,499 @@
 """
-PKT XML Builder Service - Generates Cisco Packet Tracer 8.x compatible XML
+PKT XML Builder - Generates PT 8.2.2 compatible XML structure
 
-This module builds the complete XML structure required for Cisco Packet Tracer 8.x files.
-The XML structure follows the PACKETTRACER5 schema used by PT 8.x versions.
+This module creates the complete XML structure required by Cisco Packet Tracer 8.2.2.
+The structure is based on reverse-engineering real PT 8.2.2 files.
+
+Key differences from PT 5.x:
+- <ENGINE> wrapper for device logic
+- <MODULE><SLOT><PORT> hierarchy for interfaces
+- <RUNNINGCONFIG><LINE> for CLI commands
+- <PIXMAPBANK>, <MOVIEBANK>, <SCENARIOSET>, <OPTIONS> sections
+- Complex device metadata (serial numbers, MAC addresses, etc.)
 
 References:
-- pka2xml (mircodz): https://github.com/mircodz/pka2xml
-  XML structure analysis and version compatibility
-- Unpacket (Punkcake21): https://github.com/Punkcake21/Unpacket
-  Understanding of PT file internals
-
-XML Structure for PT 8.x:
-```xml
-<PACKETTRACER5 VERSION="8.2.2.0400">
-    <WORKSPACE>
-        <DEVICES>
-            <!-- Router, Switch, PC devices with coordinates and configs -->
-        </DEVICES>
-        <LINKS>
-            <!-- Connections between devices -->
-        </LINKS>
-    </WORKSPACE>
-</PACKETTRACER5>
-```
-
-Each device must have:
-- Unique ID (numeric)
-- Type (Router2911, Switch2960, PC, etc.)
-- X, Y coordinates for visual placement
-- Configuration (IOS commands for routers/switches, IP config for PCs)
+- Real PT 8.2.2 file structure (decrypted)
+- PT XML schema documentation
 """
 
-from typing import List, Dict, Any, Tuple
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
-from app.models.schemas import SubnetResult, NetworkConfig, RoutingProtocol
-import logging
-
-logger = logging.getLogger(__name__)
-
-# PT 8.x device type identifiers
-DEVICE_TYPES = {
-    "router": "Router2911",
-    "switch": "Switch2960",
-    "pc": "PC",
-    "server": "Server"
-}
-
-# Device visual spacing (in PT canvas units)
-DEVICE_SPACING = {
-    "router_x": 200,
-    "switch_x": 150,
-    "pc_x": 100,
-    "pc_y": 150,
-    "subnet_y_spacing": 300
-}
+import uuid
+import random
+from typing import List, Dict, Any
+from datetime import datetime
 
 
-def calculate_device_position(device_type: str, index: int, subnet_index: int = 0) -> Tuple[int, int]:
+def generate_mac_address() -> str:
+    """Generate a random Cisco-style MAC address."""
+    return "{:04X}.{:04X}.{:04X}".format(
+        random.randint(0, 0xFFFF),
+        random.randint(0, 0xFFFF),
+        random.randint(0, 0xFFFF)
+    )
+
+
+def generate_serial_number(prefix: str = "PTT0810") -> str:
+    """Generate a PT-style serial number."""
+    suffix = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=5))
+    return f"{prefix}{suffix}-"
+
+
+def generate_save_ref_id() -> str:
+    """Generate PT save-ref-id."""
+    return f"save-ref-id:{random.randint(1000000000000000000, 9999999999999999999)}"
+
+
+def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
     """
-    Calculate device position on the PT canvas.
-    
-    Layout strategy:
-    - Routers: Centered top row
-    - Switches: Below routers, one per subnet
-    - PCs: Below switches, distributed per subnet
+    Build complete PT 8.2.2 XML structure.
     
     Args:
-        device_type: Type of device (router, switch, pc)
-        index: Device index (0-based)
-        subnet_index: Subnet index for proper vertical spacing
+        subnets: List of SubnetResult objects with network configuration
+        config: Dict with routing_protocol, routers, switches, pcs counts
         
     Returns:
-        Tuple of (x, y) coordinates
+        Complete XML string ready for encryption
     """
-    if device_type == "router":
-        x = 400 + (index * DEVICE_SPACING["router_x"])
-        y = 100
-    elif device_type == "switch":
-        x = 400 + (subnet_index * DEVICE_SPACING["switch_x"])
-        y = 250
-    else:  # pc
-        row = index // 4  # 4 PCs per row
-        col = index % 4
-        x = 300 + (col * DEVICE_SPACING["pc_x"]) + (subnet_index * 400)
-        y = 400 + (row * DEVICE_SPACING["pc_y"]) + (subnet_index * DEVICE_SPACING["subnet_y_spacing"])
     
-    return x, y
-
-
-def generate_router_config(router_name: str, subnets: List[SubnetResult], routing_protocol: RoutingProtocol) -> str:
-    """
-    Generate Cisco IOS configuration for a router.
+    # Extract config
+    num_routers = config.get('routers', 1)
+    num_switches = config.get('switches', 2)
+    num_pcs = config.get('pcs', 4)
+    routing_protocol = config.get('routing_protocol', 'STATIC')
     
-    Configuration includes:
-    - Hostname
-    - Interface configurations (one per subnet)
-    - Routing protocol setup
-    
-    Args:
-        router_name: Router hostname (e.g., "R1")
-        subnets: List of subnets to configure
-        routing_protocol: Routing protocol to use
-        
-    Returns:
-        Cisco IOS configuration as string
-        
-    Reference: app/services/pkt_generator.py - generate_cisco_config()
-    """
-    config_lines = []
-    
-    # Basic config
-    config_lines.append(f"hostname {router_name}")
-    config_lines.append("!")
-    config_lines.append("service password-encryption")
-    config_lines.append("!")
-    
-    # Configure interfaces
-    for i, subnet in enumerate(subnets):
-        iface = f"GigabitEthernet0/{i}"
-        config_lines.append(f"interface {iface}")
-        config_lines.append(f" description {subnet.name}")
-        config_lines.append(f" ip address {subnet.gateway} {subnet.mask}")
-        config_lines.append(" no shutdown")
-        config_lines.append("!")
-    
-    # Routing protocol
-    if routing_protocol == RoutingProtocol.RIP:
-        config_lines.append("router rip")
-        config_lines.append(" version 2")
-        for subnet in subnets:
-            network_addr = subnet.network.split("/")[0]
-            config_lines.append(f" network {network_addr}")
-        config_lines.append(" no auto-summary")
-        config_lines.append("!")
-    elif routing_protocol == RoutingProtocol.OSPF:
-        config_lines.append("router ospf 1")
-        for subnet in subnets:
-            network_addr = subnet.network.split("/")[0]
-            # Calculate wildcard mask
-            octets = subnet.mask.split(".")
-            wildcard = ".".join([str(255 - int(o)) for o in octets])
-            config_lines.append(f" network {network_addr} {wildcard} area 0")
-        config_lines.append("!")
-    elif routing_protocol == RoutingProtocol.EIGRP:
-        config_lines.append("router eigrp 100")
-        for subnet in subnets:
-            network_addr = subnet.network.split("/")[0]
-            config_lines.append(f" network {network_addr}")
-        config_lines.append(" no auto-summary")
-        config_lines.append("!")
-    
-    return "\n".join(config_lines)
-
-
-def generate_switch_config(switch_name: str, subnet: SubnetResult) -> str:
-    """
-    Generate Cisco IOS configuration for a switch.
-    
-    Args:
-        switch_name: Switch hostname (e.g., "S1")
-        subnet: Subnet this switch belongs to
-        
-    Returns:
-        Cisco IOS configuration as string
-    """
-    # Calculate management IP (use first usable IP + switch offset)
-    usable_start = subnet.usable_range[0]
-    parts = usable_start.split(".")
-    mgmt_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.{int(parts[3]) + 1}"
-    
-    config_lines = [
-        f"hostname {switch_name}",
-        "!",
-        "interface vlan 1",
-        f" ip address {mgmt_ip} {subnet.mask}",
-        " no shutdown",
-        "!",
-        f"ip default-gateway {subnet.gateway}",
-        "!"
+    # Start building XML
+    xml_lines = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<PACKETTRACER5>',
+        '  <VERSION>8.2.2.0400</VERSION>',
+        '',
+        '  <!-- Image and Movie Banks (required but can be empty) -->',
+        '  <PIXMAPBANK>',
+        '    <IMAGE>',
+        '      <IMAGE_PATH></IMAGE_PATH>',
+        '      <IMAGE_CONTENT></IMAGE_CONTENT>',
+        '    </IMAGE>',
+        '  </PIXMAPBANK>',
+        '  <MOVIEBANK/>',
+        '',
+        '  <!-- Main Network Structure -->',
+        '  <NETWORK>',
+        '    <DEVICES>',
     ]
     
-    return "\n".join(config_lines)
-
-
-def build_pkt_xml(subnets: List[SubnetResult], config: Dict[str, Any]) -> str:
-    """
-    Builds the complete XML structure for a Cisco Packet Tracer 8.x file.
+    devices = []
+    device_positions = {}
     
-    This function creates the entire network topology including:
-    - Routers with proper interface configurations
-    - Switches connected to routers
-    - PCs connected to switches with IP configurations
-    - Physical links between all devices
+    # Generate Routers
+    for i in range(num_routers):
+        router_name = f"R{i+1}"
+        x_pos = 400 + (i * 200)
+        y_pos = 100
+        device_positions[router_name] = (x_pos, y_pos)
+        
+        # Get router interfaces from subnets
+        router_interfaces = []
+        for subnet in subnets:
+            router_interfaces.append({
+                'name': f'GigabitEthernet0/{len(router_interfaces)}',
+                'ip': subnet.gateway,
+                'mask': subnet.mask,
+                'description': subnet.name
+            })
+        
+        devices.append(build_router_device(router_name, x_pos, y_pos, router_interfaces, routing_protocol))
     
-    Args:
-        subnets: List of calculated subnets
-        config: Network configuration dict with keys:
-            - routing_protocol: RoutingProtocol enum value
-            - routers: int (number of routers)
-            - switches: int (number of switches)
-            - pcs: int (number of PCs)
-            
-    Returns:
-        Complete XML string compatible with PT 8.x
+    # Generate Switches
+    for i in range(num_switches):
+        switch_name = f"S{i+1}"
+        x_pos = 400 + (i * 150)
+        y_pos = 250
+        device_positions[switch_name] = (x_pos, y_pos)
         
-    References:
-    - pka2xml structure analysis
-    - TraceNet existing pkt_generator.py logic
-    """
-    # Create root element with PT 8.x version
-    root = ET.Element("PACKETTRACER5")
-    root.set("VERSION", "8.2.2.0400")  # PT 8.x version
+        # Get switch IP from corresponding subnet
+        if i < len(subnets):
+            subnet = subnets[i]
+            switch_ip = f"{'.'.join(subnet.network.split('.')[:-1])}.{i+3}"
+            gateway = subnet.gateway
+        else:
+            switch_ip = None
+            gateway = None
+        
+        devices.append(build_switch_device(switch_name, x_pos, y_pos, switch_ip, gateway))
     
-    # Create workspace
-    workspace = ET.SubElement(root, "WORKSPACE")
-    devices = ET.SubElement(workspace, "DEVICES")
-    links = ET.SubElement(workspace, "LINKS")
-    
-    # Track device IDs and connections
-    device_id = 0
-    device_map = {}  # name -> (id, type)
-    link_id = 0
-    
-    # Get configuration
-    num_routers = config.get("routers", 1)
-    num_switches = config.get("switches", len(subnets))
-    num_pcs = config.get("pcs", 0)
-    routing_protocol = config.get("routing_protocol", RoutingProtocol.STATIC)
-    
-    # === CREATE ROUTERS ===
-    for router_idx in range(num_routers):
-        router_name = f"R{router_idx + 1}"
-        x, y = calculate_device_position("router", router_idx)
-        
-        device = ET.SubElement(devices, "DEVICE")
-        device.set("id", str(device_id))
-        device.set("name", router_name)
-        device.set("type", DEVICE_TYPES["router"])
-        device.set("x", str(x))
-        device.set("y", str(y))
-        
-        # Router configuration
-        router_config = generate_router_config(router_name, subnets, routing_protocol)
-        config_elem = ET.SubElement(device, "CONFIG")
-        config_elem.text = router_config
-        
-        # Add interfaces
-        for iface_idx, subnet in enumerate(subnets):
-            interface = ET.SubElement(device, "INTERFACE")
-            interface.set("name", f"GigabitEthernet0/{iface_idx}")
-            interface.set("ip", subnet.gateway)
-            interface.set("mask", subnet.mask)
-        
-        device_map[router_name] = (device_id, "router")
-        device_id += 1
-    
-    # === CREATE SWITCHES (one per subnet) ===
-    for switch_idx, subnet in enumerate(subnets):
-        switch_name = f"S{switch_idx + 1}"
-        x, y = calculate_device_position("switch", switch_idx, switch_idx)
-        
-        device = ET.SubElement(devices, "DEVICE")
-        device.set("id", str(device_id))
-        device.set("name", switch_name)
-        device.set("type", DEVICE_TYPES["switch"])
-        device.set("x", str(x))
-        device.set("y", str(y))
-        
-        # Switch configuration
-        switch_config = generate_switch_config(switch_name, subnet)
-        config_elem = ET.SubElement(device, "CONFIG")
-        config_elem.text = switch_config
-        
-        # Add ports (24-port switch)
-        for port in range(24):
-            interface = ET.SubElement(device, "INTERFACE")
-            interface.set("name", f"FastEthernet0/{port + 1}")
-        
-        device_map[switch_name] = (device_id, "switch")
-        device_id += 1
-        
-        # CREATE LINK: Router to Switch
-        router_name = "R1"  # Connect to first router
-        link = ET.SubElement(links, "LINK")
-        link.set("id", str(link_id))
-        link.set("from", router_name)
-        link.set("from_port", f"GigabitEthernet0/{switch_idx}")
-        link.set("to", switch_name)
-        link.set("to_port", "FastEthernet0/1")
-        link.set("type", "copper")
-        link_id += 1
-    
-    # === CREATE PCs ===
-    pcs_per_subnet = max(1, num_pcs // len(subnets)) if num_pcs > 0 else 0
-    pc_num = 1
+    # Generate PCs
+    pc_per_subnet = num_pcs // len(subnets)
+    pc_index = 0
     
     for subnet_idx, subnet in enumerate(subnets):
-        switch_name = f"S{subnet_idx + 1}"
+        for j in range(pc_per_subnet):
+            pc_index += 1
+            pc_name = f"PC{pc_index}"
+            x_pos = 300 + (pc_index * 100)
+            y_pos = 400 + (subnet_idx * 300)
+            device_positions[pc_name] = (x_pos, y_pos)
+            
+            # Calculate PC IP
+            pc_ip = f"{'.'.join(subnet.network.split('.')[:-1])}.{10+j+pc_index}"
+            
+            devices.append(build_pc_device(pc_name, x_pos, y_pos, pc_ip, subnet.mask, subnet.gateway))
+    
+    # Add all devices to XML
+    for device_xml in devices:
+        xml_lines.append(device_xml)
+    
+    xml_lines.extend([
+        '    </DEVICES>',
+        '',
+        '    <!-- Network Links -->',
+        '    <LINKS>',
+    ])
+    
+    # Generate Links (simplified topology)
+    link_id = 0
+    
+    # Connect routers to switches
+    for i in range(min(num_routers, num_switches)):
+        router_name = f"R{i+1}"
+        switch_name = f"S{i+1}"
+        xml_lines.append(build_link(link_id, router_name, f"GigabitEthernet0/{i}", switch_name, "FastEthernet0/1"))
+        link_id += 1
+    
+    # Connect PCs to switches
+    pc_index = 0
+    for switch_idx in range(num_switches):
+        switch_name = f"S{switch_idx+1}"
+        pcs_for_this_switch = pc_per_subnet
         
-        # Calculate IPs for PCs (starting after gateway and switch management)
-        usable_start = subnet.usable_range[0]
-        parts = usable_start.split(".")
-        base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}"
-        
-        for pc_idx in range(pcs_per_subnet):
-            if pc_num > num_pcs:
+        for port_idx in range(pcs_for_this_switch):
+            pc_index += 1
+            if pc_index > num_pcs:
                 break
-            
-            pc_name = f"PC{pc_num}"
-            x, y = calculate_device_position("pc", pc_idx, subnet_idx)
-            
-            device = ET.SubElement(devices, "DEVICE")
-            device.set("id", str(device_id))
-            device.set("name", pc_name)
-            device.set("type", DEVICE_TYPES["pc"])
-            device.set("x", str(x))
-            device.set("y", str(y))
-            
-            # PC IP configuration
-            pc_ip = f"{base_ip}.{int(parts[3]) + pc_idx + 10}"
-            config_elem = ET.SubElement(device, "CONFIG")
-            config_elem.set("ip", pc_ip)
-            config_elem.set("mask", subnet.mask)
-            config_elem.set("gateway", subnet.gateway)
-            
-            # PC interface
-            interface = ET.SubElement(device, "INTERFACE")
-            interface.set("name", "FastEthernet0")
-            
-            device_map[pc_name] = (device_id, "pc")
-            device_id += 1
-            
-            # CREATE LINK: Switch to PC
-            link = ET.SubElement(links, "LINK")
-            link.set("id", str(link_id))
-            link.set("from", switch_name)
-            link.set("from_port", f"FastEthernet0/{pc_idx + 2}")  # Port 1 used for router
-            link.set("to", pc_name)
-            link.set("to_port", "FastEthernet0")
-            link.set("type", "copper")
+            pc_name = f"PC{pc_index}"
+            xml_lines.append(build_link(link_id, switch_name, f"FastEthernet0/{port_idx+2}", pc_name, "FastEthernet0"))
             link_id += 1
-            
-            pc_num += 1
     
-    # Convert to pretty-printed XML string
-    xml_str = ET.tostring(root, encoding='utf-8', method='xml')
+    xml_lines.extend([
+        '    </LINKS>',
+        '  </NETWORK>',
+        '',
+        '  <!-- Scenario and Options (required sections) -->',
+        '  <SCENARIOSET>',
+        '    <SCENARIO>',
+        '      <NAME>Default</NAME>',
+        '    </SCENARIO>',
+        '  </SCENARIOSET>',
+        '',
+        '  <OPTIONS>',
+        '    <SHOW_DEVICE_MODEL>true</SHOW_DEVICE_MODEL>',
+        '    <SHOW_DEVICE_NAME>true</SHOW_DEVICE_NAME>',
+        '    <SHOW_PORT_LABELS>true</SHOW_PORT_LABELS>',
+        '    <GRID_ENABLED>false</GRID_ENABLED>',
+        '  </OPTIONS>',
+        '',
+        '</PACKETTRACER5>',
+    ])
     
-    # Pretty print
-    dom = minidom.parseString(xml_str)
-    pretty_xml = dom.toprettyxml(indent="  ", encoding="utf-8")
+    return '\n'.join(xml_lines)
+
+
+def build_router_device(name: str, x: int, y: int, interfaces: List[Dict], routing_protocol: str) -> str:
+    """Build Router device XML (PT 8.2.2 structure)."""
     
-    # Decode bytes to string and remove extra blank lines
-    xml_string = pretty_xml.decode('utf-8')
-    lines = [line for line in xml_string.split('\n') if line.strip()]
+    mac_base = generate_mac_address()
+    serial = generate_serial_number()
+    save_ref = generate_save_ref_id()
     
-    logger.info(f"✅ Built XML with {device_id} devices and {link_id} links")
+    # Build running config
+    config_lines = [
+        '!',
+        'version 12.2',
+        'no service timestamps log datetime msec',
+        'no service timestamps debug datetime msec',
+        'no service password-encryption',
+        '!',
+        f'hostname {name}',
+        '!',
+        'ip cef',
+        'no ipv6 cef',
+        '!',
+    ]
     
-    return '\n'.join(lines)
+    # Add interface configs
+    for iface in interfaces:
+        config_lines.extend([
+            '!',
+            f'interface {iface["name"]}',
+            f' description {iface["description"]}',
+            f' ip address {iface["ip"]} {iface["mask"]}',
+            ' duplex auto',
+            ' speed auto',
+            ' no shutdown',
+        ])
+    
+    config_lines.extend([
+        '!',
+        'ip classless',
+        '!',
+        'line con 0',
+        '!',
+        'line vty 0 4',
+        ' login',
+        '!',
+        'end',
+    ])
+    
+    running_config_xml = '\n'.join([f'          <LINE>{line}</LINE>' for line in config_lines])
+    
+    # Build interface ports XML
+    ports_xml = []
+    for idx, iface in enumerate(interfaces):
+        port_mac = generate_mac_address()
+        ports_xml.append(f'''
+        <SLOT>
+          <TYPE>ePtRouterModule</TYPE>
+          <MODULE>
+            <TYPE>ePtRouterModule</TYPE>
+            <MODEL>PT-ROUTER-NM-1CGE</MODEL>
+            <PORT>
+              <TYPE>eCopperGigabitEthernet</TYPE>
+              <POWER>true</POWER>
+              <MEDIATYPE>0</MEDIATYPE>
+              <BANDWIDTH>1000000</BANDWIDTH>
+              <FULLDUPLEX>true</FULLDUPLEX>
+              <MACADDRESS>{port_mac}</MACADDRESS>
+              <BIA>{port_mac}</BIA>
+              <UP_METHOD>3</UP_METHOD>
+              <IP>{iface["ip"]}</IP>
+              <SUBNET>{iface["mask"]}</SUBNET>
+            </PORT>
+          </MODULE>
+        </SLOT>''')
+    
+    # Add empty slots
+    for _ in range(10 - len(interfaces)):
+        ports_xml.append('        <SLOT><TYPE>ePtRouterModule</TYPE></SLOT>')
+    
+    xml = f'''
+      <DEVICE>
+        <ENGINE>
+          <TYPE customModel="" model="Router-PT">Router</TYPE>
+          <NAME translate="true">{name}</NAME>
+          <POWER>true</POWER>
+          <DESCRIPTION></DESCRIPTION>
+          <MODULE>
+            <TYPE>eNonRemovableModule</TYPE>
+            <MODEL/>
+{''.join(ports_xml)}
+          </MODULE>
+          <COORD_SETTINGS>
+            <X_COORD>{x}</X_COORD>
+            <Y_COORD>{y}</Y_COORD>
+            <Z_COORD>0</Z_COORD>
+          </COORD_SETTINGS>
+          <SERIALNUMBER>{serial}</SERIALNUMBER>
+          <STARTTIME>730940400000</STARTTIME>
+          <SAVE_REF_ID>{save_ref}</SAVE_REF_ID>
+          <SYS_NAME>{name}</SYS_NAME>
+          <RUNNINGCONFIG>
+{running_config_xml}
+          </RUNNINGCONFIG>
+          <STARTUPCONFIG/>
+          <BUILD_IN_ADDR>{mac_base}</BUILD_IN_ADDR>
+        </ENGINE>
+        <WORKSPACE>
+          <LOGICAL>
+            <X>{x}</X>
+            <Y>{y}</Y>
+          </LOGICAL>
+        </WORKSPACE>
+      </DEVICE>'''
+    
+    return xml
+
+
+def build_switch_device(name: str, x: int, y: int, ip: str = None, gateway: str = None) -> str:
+    """Build Switch device XML (PT 8.2.2 structure)."""
+    
+    mac_base = generate_mac_address()
+    serial = generate_serial_number()
+    save_ref = generate_save_ref_id()
+    
+    # Build running config
+    config_lines = [
+        '!',
+        'version 12.1',
+        'no service timestamps log datetime msec',
+        'no service timestamps debug datetime msec',
+        'no service password-encryption',
+        '!',
+        f'hostname {name}',
+        '!',
+        'spanning-tree mode pvst',
+        '!',
+    ]
+    
+    # Add 24 FastEthernet ports
+    for i in range(1, 25):
+        config_lines.extend([
+            f'interface FastEthernet0/{i}',
+            '!',
+        ])
+    
+    # Add VLAN 1 config
+    if ip and gateway:
+        config_lines.extend([
+            'interface Vlan1',
+            f' ip address {ip} 255.255.255.0',
+            ' no shutdown',
+            '!',
+            f'ip default-gateway {gateway}',
+        ])
+    else:
+        config_lines.extend([
+            'interface Vlan1',
+            ' no ip address',
+            ' shutdown',
+        ])
+    
+    config_lines.extend([
+        '!',
+        'line con 0',
+        '!',
+        'line vty 0 15',
+        ' login',
+        '!',
+        'end',
+    ])
+    
+    running_config_xml = '\n'.join([f'          <LINE>{line}</LINE>' for line in config_lines])
+    
+    # Build 24 switch ports
+    ports_xml = []
+    for i in range(24):
+        port_mac = generate_mac_address()
+        ports_xml.append(f'''
+        <SLOT>
+          <TYPE>ePtSwitchModule</TYPE>
+          <MODULE>
+            <TYPE>ePtSwitchModule</TYPE>
+            <MODEL>PT-SWITCH-NM-1CFE</MODEL>
+            <PORT>
+              <TYPE>eCopperFastEthernet</TYPE>
+              <POWER>true</POWER>
+              <BANDWIDTH>100000</BANDWIDTH>
+              <FULLDUPLEX>true</FULLDUPLEX>
+              <MACADDRESS>{port_mac}</MACADDRESS>
+              <BIA>{port_mac}</BIA>
+            </PORT>
+          </MODULE>
+        </SLOT>''')
+    
+    xml = f'''
+      <DEVICE>
+        <ENGINE>
+          <TYPE customModel="" model="Switch-PT">Switch</TYPE>
+          <NAME translate="true">{name}</NAME>
+          <POWER>true</POWER>
+          <DESCRIPTION></DESCRIPTION>
+          <MODULE>
+            <TYPE>eNonRemovableModule</TYPE>
+            <MODEL/>
+{''.join(ports_xml)}
+          </MODULE>
+          <COORD_SETTINGS>
+            <X_COORD>{x}</X_COORD>
+            <Y_COORD>{y}</Y_COORD>
+            <Z_COORD>0</Z_COORD>
+          </COORD_SETTINGS>
+          <SERIALNUMBER>{serial}</SERIALNUMBER>
+          <STARTTIME>730940400000</STARTTIME>
+          <SAVE_REF_ID>{save_ref}</SAVE_REF_ID>
+          <SYS_NAME>{name}</SYS_NAME>
+          <RUNNINGCONFIG>
+{running_config_xml}
+          </RUNNINGCONFIG>
+          <STARTUPCONFIG/>
+          <BUILD_IN_ADDR>{mac_base}</BUILD_IN_ADDR>
+        </ENGINE>
+        <WORKSPACE>
+          <LOGICAL>
+            <X>{x}</X>
+            <Y>{y}</Y>
+          </LOGICAL>
+        </WORKSPACE>
+      </DEVICE>'''
+    
+    return xml
+
+
+def build_pc_device(name: str, x: int, y: int, ip: str, mask: str, gateway: str) -> str:
+    """Build PC device XML (PT 8.2.2 structure)."""
+    
+    mac = generate_mac_address()
+    serial = generate_serial_number()
+    save_ref = generate_save_ref_id()
+    
+    xml = f'''
+      <DEVICE>
+        <ENGINE>
+          <TYPE customModel="" model="PC-PT">Pc</TYPE>
+          <NAME translate="true">{name}</NAME>
+          <POWER>true</POWER>
+          <DESCRIPTION></DESCRIPTION>
+          <MODULE>
+            <TYPE>eNonRemovableModule</TYPE>
+            <MODEL/>
+            <SLOT>
+              <TYPE>ePtHostModule</TYPE>
+              <MODULE>
+                <TYPE>ePtHostModule</TYPE>
+                <MODEL>PT-HOST-NM-1CFE</MODEL>
+                <PORT>
+                  <TYPE>eCopperFastEthernet</TYPE>
+                  <POWER>true</POWER>
+                  <BANDWIDTH>100000</BANDWIDTH>
+                  <FULLDUPLEX>true</FULLDUPLEX>
+                  <MACADDRESS>{mac}</MACADDRESS>
+                  <BIA>{mac}</BIA>
+                  <IP>{ip}</IP>
+                  <SUBNET>{mask}</SUBNET>
+                  <PORT_GATEWAY>{gateway}</PORT_GATEWAY>
+                </PORT>
+              </MODULE>
+            </SLOT>
+          </MODULE>
+          <COORD_SETTINGS>
+            <X_COORD>{x}</X_COORD>
+            <Y_COORD>{y}</Y_COORD>
+            <Z_COORD>0</Z_COORD>
+          </COORD_SETTINGS>
+          <SERIALNUMBER>{serial}</SERIALNUMBER>
+          <STARTTIME>730940400000</STARTTIME>
+          <SAVE_REF_ID>{save_ref}</SAVE_REF_ID>
+          <SYS_NAME>{name}</SYS_NAME>
+          <GATEWAY>{gateway}</GATEWAY>
+        </ENGINE>
+        <WORKSPACE>
+          <LOGICAL>
+            <X>{x}</X>
+            <Y>{y}</Y>
+          </LOGICAL>
+        </WORKSPACE>
+      </DEVICE>'''
+    
+    return xml
+
+
+def build_link(link_id: int, from_dev: str, from_port: str, to_dev: str, to_port: str) -> str:
+    """Build Link XML (simplified PT 8.2.2 structure)."""
+    
+    xml = f'''      <LINK>
+        <ID>{link_id}</ID>
+        <TYPE>eCopper</TYPE>
+        <FROM_DEVICE>{from_dev}</FROM_DEVICE>
+        <FROM_PORT>{from_port}</FROM_PORT>
+        <TO_DEVICE>{to_dev}</TO_DEVICE>
+        <TO_PORT>{to_port}</TO_PORT>
+      </LINK>'''
+    
+    return xml
