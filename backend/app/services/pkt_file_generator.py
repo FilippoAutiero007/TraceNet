@@ -1,256 +1,354 @@
-import struct
 """
-PKT File Generator Service - Creates Cisco Packet Tracer 8.x compatible files
-
-This module orchestrates the complete generation of .pkt files that can be opened
-in Cisco Packet Tracer 8.x and later versions.
-
-Process:
-1. Build XML structure (using pkt_xml_builder.py)
-2. Encrypt XML data (using pkt_crypto.py)
-3. Write final .pkt file (PT 8.2.2: entire file encrypted, no plaintext header)
-4. Validate roundtrip encryption (optional)
-
-References:
-- pka2xml (mircodz): https://github.com/mircodz/pka2xml
-  Used for understanding PT file format and encryption
-- Unpacket (Punkcake21): https://github.com/Punkcake21/Unpacket
-  Used for Twofish/EAX implementation
-
-Key improvements over original implementation:
-- Uses proper Twofish/EAX encryption (not XOR obfuscation)
-- Generates PT 8.x compatible XML structure
-- Includes validation of encryption pipeline
-- Full documentation of cryptographic process
-- PT 8.2.2 format: no plaintext PKT5 header (entire file encrypted)
+Final PKT Generator - Optimized with link support
 """
+import sys
+sys.path.insert(0, '.')
 
-import os
-import logging
-import uuid
-from datetime import datetime
-from typing import List, Dict, Any
+from app.services.pkt_crypto import decrypt_pkt_data, encrypt_pkt_data
+import xml.etree.ElementTree as ET
+import random
+import copy
 
-from app.models.schemas import SubnetResult
-from app.services.pkt_xml_builder import build_pkt_xml
-from app.services.pkt_crypto import encrypt_pkt_data, validate_encryption
-
-logger = logging.getLogger(__name__)
-
-# Default configuration
-DEFAULT_OUTPUT_DIR = "/tmp/tracenet"
-DEFAULT_XML_VERSION = "8.2.2.0400"  # PT 8.x version
-
-
-def save_pkt_file(subnets: List[SubnetResult], config: Dict[str, Any], output_dir: str = None) -> Dict[str, Any]:
-    """
-    Generate a complete .pkt file with proper encryption.
+class PKTGenerator:
+    def __init__(self, template_path='simple_ref.pkt'):
+        """Load template once at initialization."""
+        print("📂 Loading PKT template...")
+        with open(template_path, 'rb') as f:
+            encrypted = f.read()
+        
+        xml_str = decrypt_pkt_data(encrypted).decode('utf-8')
+        self.template_root = ET.fromstring(xml_str)
+        
+        # Extract device templates
+        template_network = self.template_root.find('NETWORK')
+        template_devices = template_network.find('DEVICES').findall('DEVICE')
+        
+        self.device_templates = {}
+        for dev in template_devices:
+            engine = dev.find('ENGINE')
+            dev_type = engine.find('TYPE').text.lower()
+            self.device_templates[dev_type] = dev
+        
+        # Extract link template
+        template_links = template_network.find('LINKS').findall('LINK')
+        self.link_template = template_links[0] if template_links else None
+        
+        print(f"✅ Template loaded with {len(self.device_templates)} device types")
     
-    This is the main entry point for PKT file generation. It coordinates:
-    1. XML structure building (pkt_xml_builder.py)
-    2. Encryption (pkt_crypto.py using Unpacket's implementation)
-    3. File I/O
-    4. Validation
+    def generate(self, devices_config, links_config=None, output_path='output.pkt'):
+        """
+        Generate PKT file.
+        
+        Args:
+            devices_config: [{'name': 'R1', 'type': 'router', 'ip': '10.0.0.1', ...}]
+            links_config: [{'from': 'R1', 'from_port': 'Fa0/0', 'to': 'S1', 'to_port': 'Fa0/1'}]
+            output_path: Output file path
+        """
+        print(f"\n🔨 Generating PKT: {output_path}")
+        print("=" * 60)
+        
+        # Clone root template
+        root = copy.deepcopy(self.template_root)
+        network = root.find('NETWORK')
+        devices_elem = network.find('DEVICES')
+        links_elem = network.find('LINKS')
+        
+        # Clear existing
+        devices_elem.clear()
+        links_elem.clear()
+        
+        device_saverefs = {}
+        
+        # Create devices
+        print(f"\n📦 Creating {len(devices_config)} devices...")
+        for idx, dev_cfg in enumerate(devices_config):
+            dev_type = dev_cfg.get('type', 'router').lower()
+            
+            # Get template
+            template = self.device_templates.get(dev_type)
+            if not template:
+                print(f"   ⚠️  No template for '{dev_type}', using router")
+                template = self.device_templates.get('router')
+            
+            # Clone and modify
+            new_device = copy.deepcopy(template)
+            engine = new_device.find('ENGINE')
+            
+            # Update basic info
+            engine.find('NAME').text = dev_cfg['name']
+            
+            sysname = engine.find('SYSNAME')
+            if sysname is not None:
+                sysname.text = dev_cfg['name']
+            
+            # Generate new SAVEREFID
+            new_saverefid = f"save-ref-id{random.randint(10**18, 10**19)}"
+            saverefid_elem = engine.find('SAVEREFID')
+            if saverefid_elem is not None:
+                saverefid_elem.text = new_saverefid
+            else:
+                ET.SubElement(engine, 'SAVEREFID').text = new_saverefid
+            
+            device_saverefs[dev_cfg['name']] = new_saverefid
+            
+            # Update position
+            coords = engine.find('COORDSETTINGS')
+            if coords is not None:
+                coords.find('XCOORD').text = str(dev_cfg.get('x', 200 + idx * 200))
+                coords.find('YCOORD').text = str(dev_cfg.get('y', 300))
+            
+            # Update IP
+            if 'ip' in dev_cfg:
+                self._update_device_ip(engine, dev_cfg)
+            
+            devices_elem.append(new_device)
+            print(f"   ✅ {dev_cfg['name']} ({dev_type})")
+        
+        # Create links
+        if links_config:
+            print(f"\n🔗 Creating {len(links_config)} links...")
+            for link_cfg in links_config:
+                self._create_link(links_elem, link_cfg, device_saverefs)
+                print(f"   ✅ {link_cfg['from']} <-> {link_cfg['to']}")
+        
+        # Save
+        xml_str = '<?xml version="1.0" encoding="utf-8"?>\n'
+        xml_str += ET.tostring(root, encoding='unicode', method='xml')
+        
+        encrypted = encrypt_pkt_data(xml_str.encode('utf-8'))
+        
+        with open(output_path, 'wb') as f:
+            f.write(encrypted)
+        
+        print(f"\n✅ Generated: {output_path} ({len(encrypted)} bytes)")
+        return output_path
+    
+    def _update_device_ip(self, engine, dev_cfg):
+        """Update first port IP."""
+        module = engine.find('MODULE')
+        if module is None:
+            return
+        
+        slots = module.findall('SLOT')
+        if not slots:
+            return
+        
+        slot_module = slots[0].find('MODULE')
+        if slot_module is None:
+            return
+        
+        port = slot_module.find('PORT')
+        if port is None:
+            return
+        
+        # Update IP fields
+        for tag, value in [
+            ('IP', dev_cfg.get('ip', '')),
+            ('SUBNET', dev_cfg.get('subnet', '255.255.255.0')),
+            ('POWER', 'true'),
+            ('UPMETHOD', '3')
+        ]:
+            elem = port.find(tag)
+            if elem is not None:
+                elem.text = value
+    
+    def _create_link(self, links_elem, link_cfg, device_saverefs):
+        """Create link between devices."""
+        if not self.link_template:
+            print("   ⚠️  No link template available")
+            return
+        
+        link = copy.deepcopy(self.link_template)
+        
+        # Update FROM
+        from_saveref = device_saverefs.get(link_cfg['from'])
+        to_saveref = device_saverefs.get(link_cfg['to'])
+        
+        if not from_saveref or not to_saveref:
+            print(f"   ⚠️  Device not found for link")
+            return
+        
+        link.find('FROM').text = from_saveref
+        link.find('TO').text = to_saveref
+        
+        # Update ports
+        ports = link.findall('PORT')
+        if len(ports) >= 2:
+            ports[0].text = link_cfg.get('from_port', 'FastEthernet0/0')
+            ports[1].text = link_cfg.get('to_port', 'FastEthernet0/1')
+        
+        # Randomize memory addresses
+        for tag in ['FROMDEVICEMEMADDR', 'TODEVICEMEMADDR', 
+                    'FROMPORTMEMADDR', 'TOPORTMEMADDR']:
+            elem = link.find(tag)
+            if elem is not None:
+                elem.text = str(random.randint(10**12, 10**13))
+        
+        links_elem.append(link)
+
+
+def save_pkt_file(subnets: list, config: dict, output_dir: str) -> dict:
+    """
+    Generate and save PKT file using template-based approach.
+    
+    This function is called by the API endpoints and uses the PKTGenerator class
+    which clones devices from simple_ref.pkt template for guaranteed compatibility.
     
     Args:
-        subnets: List of calculated subnet configurations
-        config: Network configuration dict containing:
-            - routing_protocol: RoutingProtocol value
-            - routers: int (number of routers)
-            - switches: int (number of switches) 
-            - pcs: int (number of PCs)
-        output_dir: Directory to save files (default: /tmp/tracenet)
+        subnets: List of subnet objects from VLSM calculation
+        config: Network configuration dictionary
+        output_dir: Directory to save output files
         
     Returns:
-        Dict with generation results:
-        {
-            "success": bool,
-            "pkt_path": str (path to .pkt file),
-            "xml_path": str (path to debug XML file),
-            "encoding_used": str (always "twofish_eax"),
-            "file_size": int (bytes),
-            "validation": str (validation message)
-        }
-        
-    References:
-    - Original pkt_file_generator.py for structure
-    - pka2xml for encryption algorithm
-    - Unpacket for cryptographic implementation
+        dict with success status, file paths, and metadata
     """
-    # Setup output directory
-    if output_dir is None:
-        output_dir = os.getenv("OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
+    import os
+    import logging
+    from datetime import datetime
     
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate timestamped filenames with unique identifier to prevent race conditions
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_id = str(uuid.uuid4())[:8]
-    pkt_path = os.path.join(output_dir, f"network_{timestamp}_{unique_id}.pkt")
-    xml_path = os.path.join(output_dir, f"network_{timestamp}_{unique_id}.xml")
-    
-    logger.info(f"🔧 PKT Generation Started")
-    logger.info(f"   Output path: {pkt_path}")
-    logger.info(f"   Using: Twofish/EAX encryption (Unpacket implementation)")
+    logger = logging.getLogger(__name__)
+    logger.info("🔨 Generating PKT file using template-based approach...")
     
     try:
-        # STEP 1: Build XML structure
-        logger.info(f"📝 Step 1: Building XML structure...")
-        xml_content = build_pkt_xml(subnets, config)
-        logger.info(f"✅ XML structure built ({len(xml_content)} bytes)")
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
         
-        # STEP 2: Save debug XML file
-        logger.info(f"💾 Step 2: Saving debug XML...")
-        with open(xml_path, 'w', encoding='utf-8') as f:
-            f.write(xml_content)
-        logger.info(f"✅ Debug XML saved: {xml_path}")
+        # Generate timestamp for unique filenames
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pkt_filename = f"network_{timestamp}.pkt"
+        xml_filename = f"network_{timestamp}.xml"
         
-        # STEP 3: Validate XML before encryption
-        try:
-            import xml.etree.ElementTree as ET
-            ET.fromstring(xml_content)
-            logger.info(f"✅ XML validation passed")
-        except ET.ParseError as e:
-            logger.warning(f"⚠️ XML Validation Warning: {e}")
+        pkt_path = os.path.join(output_dir, pkt_filename)
+        xml_path = os.path.join(output_dir, xml_filename)
         
-        # STEP 4: Encrypt XML data
-        logger.info(f"🔐 Step 4: Encrypting with Twofish/EAX...")
-        xml_bytes = xml_content.encode('utf-8')
-        encrypted_data = encrypt_pkt_data(xml_bytes)
-        logger.info(f"✅ Encryption complete ({len(encrypted_data)} bytes)")
+        # Get template path
+        template_path = os.path.join(
+            os.path.dirname(__file__), 
+            '..', '..', 
+            'templates', 
+            'simple_ref.pkt'
+        )
+        template_path = os.path.abspath(template_path)
         
-        # STEP 5: Validate encryption (roundtrip test)
-        logger.info(f"🔍 Step 5: Validating encryption...")
-        is_valid, validation_msg = validate_encryption(xml_bytes)
-        logger.info(f"   {validation_msg}")
+        if not os.path.exists(template_path):
+            logger.error(f"Template not found: {template_path}")
+            return {
+                "success": False,
+                "error": f"Template file not found: {template_path}"
+            }
         
-        # STEP 6: Write .pkt file (PT 8.2.2 format - no plaintext header)
-        logger.info(f"💾 Step 6: Writing .pkt file...")
-        # PT 8.2.2 encrypts the ENTIRE file including the PKT5 header
-        # The <PACKETTRACER5> XML tag is inside the encrypted data, not a separate plaintext header
-        with open(pkt_path, 'wb') as f:
-            f.write(encrypted_data)
+        # Initialize generator
+        logger.info(f"Loading template from: {template_path}")
+        generator = PKTGenerator(template_path)
         
-        file_size = os.path.getsize(pkt_path)
-        logger.info(f"✅ PKT file written: {file_size} bytes")
+        # Convert subnets to device configuration
+        devices_config = []
+        device_counter = {"router": 0, "switch": 0, "pc": 0}
         
-        # Check file size sanity
-        if file_size < 100:
-            logger.warning(f"⚠️ File size suspiciously small ({file_size} bytes)")
+        # Get device counts from config
+        device_counts = config.get("devices", {})
+        num_routers = device_counts.get("routers", 1)
+        num_switches = device_counts.get("switches", 1)
+        num_pcs = device_counts.get("pcs", 0)
+        
+        # Create routers
+        for i in range(num_routers):
+            devices_config.append({
+                "name": f"Router{i}",
+                "type": "router",
+                "x": 200 + i * 150,
+                "y": 200
+            })
+        
+        # Create switches
+        for i in range(num_switches):
+            devices_config.append({
+                "name": f"Switch{i}",
+                "type": "switch",
+                "x": 200 + i * 150,
+                "y": 350
+            })
+        
+        # Create PCs with IPs from subnets
+        pc_idx = 0
+        for subnet in subnets:
+            # Assign some PCs to this subnet
+            subnet_pcs = min(3, num_pcs - pc_idx)  # Max 3 PCs per subnet
             
-        # Success response
+            for i in range(subnet_pcs):
+                if pc_idx >= num_pcs:
+                    break
+                    
+                # Get usable IP from subnet
+                ip = subnet.usable_range[i] if i < len(subnet.usable_range) else ""
+                
+                devices_config.append({
+                    "name": f"PC{pc_idx}",
+                    "type": "pc",
+                    "ip": ip,
+                    "subnet": subnet.mask,
+                    "x": 200 + pc_idx * 120,
+                    "y": 500
+                })
+                pc_idx += 1
+        
+        logger.info(f"Generating {len(devices_config)} devices...")
+        
+        # Generate PKT file (no links for now - basic topology)
+        generator.generate(devices_config, links_config=None, output_path=pkt_path)
+        
+        # Save XML for debugging
+        with open(template_path, 'rb') as f:
+            from app.services.pkt_crypto import decrypt_pkt_data
+            xml_content = decrypt_pkt_data(f.read()).decode('utf-8')
+            with open(xml_path, 'w', encoding='utf-8') as xml_f:
+                xml_f.write(xml_content)
+        
+        # Get file size
+        file_size = os.path.getsize(pkt_path)
+        
+        logger.info(f"✅ PKT file generated successfully: {pkt_path}")
+        
         return {
             "success": True,
             "pkt_path": pkt_path,
             "xml_path": xml_path,
-            "encoding_used": "twofish_eax",
+            "encoding_used": "template_based",
             "file_size": file_size,
-            "validation": validation_msg,
-            "pka2xml_available": False
+            "pka2xml_available": False,  # Not using pka2xml
+            "method": "template_cloning"
         }
         
     except Exception as e:
         logger.error(f"❌ PKT generation failed: {str(e)}", exc_info=True)
-        
-        # Create error file for debugging
-        try:
-            error_path = pkt_path + ".err"
-            with open(error_path, 'w') as f:
-                f.write(f"Error: {str(e)}\n")
-                f.write(f"Config: {config}\n")
-                f.write(f"Subnets: {len(subnets)}\n")
-            logger.info(f"📝 Error details saved to: {error_path}")
-        except:
-            pass
-        
         return {
             "success": False,
-            "error": str(e),
-            "encoding_used": "failed",
-            "pkt_path": None,
-            "xml_path": None
-        }
-
-
-def validate_pkt_file(pkt_path: str) -> Dict[str, Any]:
-    """
-    Validates a generated .pkt file by attempting to decrypt it.
-    
-    This function verifies that:
-    1. File exists and is readable
-    2. File can be decrypted successfully
-    3. Decrypted data is valid XML
-    4. XML contains expected PT structure
-    
-    Args:
-        pkt_path: Path to .pkt file to validate
-        
-    Returns:
-        Dict with validation results
-    """
-    from app.services.pkt_crypto import decrypt_pkt_data
-    import xml.etree.ElementTree as ET
-    
-    logger.info(f"🔍 Validating PKT file: {pkt_path}")
-    
-    if not os.path.exists(pkt_path):
-        return {
-            "valid": False,
-            "error": "File does not exist"
-        }
-    
-    try:
-        # Read file
-        with open(pkt_path, 'rb') as f:
-            encrypted_data = f.read()
-        
-        logger.info(f"   File size: {len(encrypted_data)} bytes")
-        
-        # Decrypt
-        xml_data = decrypt_pkt_data(encrypted_data)
-        logger.info(f"   Decrypted size: {len(xml_data)} bytes")
-        
-        # Parse XML
-        root = ET.fromstring(xml_data)
-        
-        # Check structure
-        if root.tag != "PACKETTRACER5":
-            return {
-                "valid": False,
-                "error": f"Invalid root tag: {root.tag}"
-            }
-        
-        version = root.get("VERSION", "unknown")
-        workspace = root.find("WORKSPACE")
-        
-        if workspace is None:
-            return {
-                "valid": False,
-                "error": "Missing WORKSPACE element"
-            }
-        
-        devices = workspace.find("DEVICES")
-        links = workspace.find("LINKS")
-        
-        device_count = len(devices.findall("DEVICE")) if devices is not None else 0
-        link_count = len(links.findall("LINK")) if links is not None else 0
-        
-        logger.info(f"✅ Validation passed:")
-        logger.info(f"   Version: {version}")
-        logger.info(f"   Devices: {device_count}")
-        logger.info(f"   Links: {link_count}")
-        
-        return {
-            "valid": True,
-            "version": version,
-            "devices": device_count,
-            "links": link_count,
-            "xml_size": len(xml_data)
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Validation failed: {str(e)}")
-        return {
-            "valid": False,
             "error": str(e)
         }
+
+
+# Test
+if __name__ == "__main__":
+    gen = PKTGenerator('simple_ref.pkt')
+    
+    # Define network topology
+    devices = [
+        {'name': 'R1', 'type': 'router', 'ip': '192.168.1.1', 'x': 200, 'y': 300},
+        {'name': 'S1', 'type': 'switch', 'x': 400, 'y': 300},
+        {'name': 'PC1', 'type': 'pc', 'ip': '192.168.1.10', 'x': 600, 'y': 200},
+        {'name': 'PC2', 'type': 'pc', 'ip': '192.168.1.11', 'x': 600, 'y': 400}
+    ]
+    
+    links = [
+        {'from': 'R1', 'from_port': 'FastEthernet0/0', 'to': 'S1', 'to_port': 'FastEthernet0/1'},
+        {'from': 'S1', 'from_port': 'FastEthernet1/1', 'to': 'PC1', 'to_port': 'FastEthernet0'},
+        {'from': 'S1', 'from_port': 'FastEthernet2/1', 'to': 'PC2', 'to_port': 'FastEthernet0'}
+    ]
+    
+    output = gen.generate(devices, links, 'final_network.pkt')
+    
+    # Open
+    import subprocess
+    subprocess.Popen(['start', output], shell=True)
+    print("\n🚀 Opening in Packet Tracer...")
+

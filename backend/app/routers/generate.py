@@ -4,6 +4,7 @@ Generate router - API endpoints for network generation and .pkt file download
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from app.models.schemas import GenerateRequest, GenerateResponse, PktGenerateRequest, PktGenerateResponse
+from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
 from app.services.nlp_parser import parse_network_description
 from app.services.subnet_calculator import calculate_vlsm
 from app.services.pkt_generator import generate_cisco_config
@@ -143,6 +144,111 @@ async def generate_pkt_file(request: GenerateRequest):
             success=False,
             error=f"PKT generation failed: {str(e)}"
         )
+
+@router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
+async def generate_pkt_file_manual(request: ManualNetworkRequest):
+    """
+    Generate Cisco Packet Tracer .pkt file from structured parameters (NO NLP parsing).
+    
+    This endpoint bypasses Mistral AI NLP parsing and accepts direct structured parameters.
+    Ideal for automation, testing, and when you already know exact network requirements.
+    
+    Args:
+        request: ManualNetworkRequest with base_network, subnets, devices, routing_protocol
+    
+    Returns:
+        - pkt_path: Path to download the .pkt file
+        - xml_path: Path to download the debug .xml file
+        - download_url: URL to download the .pkt file
+        - encoding_method: Method used for encryption (external_pka2xml or legacy_xor_fallback)
+    
+    Example:
+        ```json
+        {
+            "base_network": "192.168.0.0/24",
+            "subnets": [
+                {"name": "Admin", "required_hosts": 20},
+                {"name": "Guest", "required_hosts": 50}
+            ],
+            "devices": {
+                "routers": 1,
+                "switches": 2,
+                "pcs": 70
+            },
+            "routing_protocol": "static"
+        }
+        ```
+    """
+    try:
+        # Step 1: Calculate VLSM subnets (no NLP parsing needed)
+        subnets = calculate_vlsm(
+            request.base_network,
+            request.subnets
+        )
+        
+        # Step 2: Create network config dict for PKT generation
+        network_config_dict = {
+            "base_network": request.base_network,
+            "subnets": [s.model_dump() for s in request.subnets],
+            "devices": request.devices.model_dump(),
+            "routing_protocol": request.routing_protocol.value,
+            "XML_VERSION": "8.2.2.0400"  # Default PT version
+        }
+        
+        # Step 3: Generate and Save Packet Tracer File
+        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        
+        with _pkt_generation_lock:
+            result = save_pkt_file(subnets, network_config_dict, output_dir)
+        
+        if not result["success"]:
+            raise Exception(result.get("error", "Unknown error"))
+        
+        pkt_path = result["pkt_path"]
+        xml_path = result["xml_path"]
+        encoding_method = result["encoding_used"]
+        file_size = result["file_size"]
+        pka2xml_avail = result["pka2xml_available"]
+        
+        # Generate download URLs
+        pkt_filename = os.path.basename(pkt_path)
+        xml_filename = os.path.basename(xml_path)
+        
+        return ManualPktGenerateResponse(
+            success=True,
+            message=f"✅ File .pkt generato con successo! (Encoding: {encoding_method}, Size: {file_size} bytes)",
+            pkt_path=pkt_path,
+            xml_path=xml_path,
+            pkt_download_url=f"/api/download/{pkt_filename}",
+            xml_download_url=f"/api/download/{xml_filename}",
+            config_summary={
+                "base_network": request.base_network,
+                "subnets_count": len(subnets),
+                "routers": request.devices.routers,
+                "switches": request.devices.switches,
+                "pcs": request.devices.pcs,
+                "routing_protocol": request.routing_protocol.value
+            },
+            subnets=[{
+                "name": s.name,
+                "network": s.network,
+                "gateway": s.gateway,
+                "usable_hosts": s.usable_hosts
+            } for s in subnets],
+            encoding_method=encoding_method
+        )
+        
+    except ValueError as e:
+        return ManualPktGenerateResponse(
+            success=False,
+            error=f"Validation error: {str(e)}"
+        )
+    except Exception as e:
+        return ManualPktGenerateResponse(
+            success=False,
+            error=f"PKT generation failed: {str(e)}"
+        )
+
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):

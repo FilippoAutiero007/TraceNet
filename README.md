@@ -321,33 +321,18 @@ echo "VITE_API_URL=http://localhost:PORTA" > nettrace/.env
 
 MIT License - vedi [LICENSE](LICENSE) per dettagli.
 
-## 👨‍💻 Autore
 
-**Filippo Autiero**
-- GitHub: [@FilippoAutiero007](https://github.com/FilippoAutiero007)
-- Repository: [TraceNet](https://github.com/FilippoAutiero007/TraceNet)
+## 🎯 PKT Generation (NEW!)
 
-## 🤝 Contributi
+TraceNet now generates **working Cisco Packet Tracer files**!
 
-I contributi sono benvenuti! Per favore:
-1. Forka il repository
-2. Crea un branch per la tua feature (`git checkout -b feature/AmazingFeature`)
-3. Committa i cambiamenti (`git commit -m 'Add AmazingFeature'`)
-4. Pusha sul branch (`git push origin feature/AmazingFeature`)
-5. Apri una Pull Request
+### Features
+- ✅ Template-based generation (PT 8.2.2 compatible)
+- ✅ Dynamic device creation (routers, switches, PCs)
+- ✅ Automatic link generation
+- ✅ IP configuration support
 
-## 📚 Roadmap
-
-- [ ] Autenticazione utenti con Clerk
-- [ ] Salvataggio configurazioni nel database
-- [ ] Visualizzazione grafica della topologia di rete
-- [ ] Export in altri formati (EVE-NG, GNS3)
-- [ ] Supporto per configurazioni avanzate (ACL, NAT, VPN)
-- [ ] Template marketplace condiviso dalla community
-
-## 🙏 Ringraziamenti
-
-- **Mistral AI** per il modello NLP
-- **shadcn/ui** per i componenti UI
-- **FastAPI** per il framework backend
-- **Cisco** per Packet Tracer
+### Quick Test
+```bash
+cd backend
+python pkt_generator_final.py

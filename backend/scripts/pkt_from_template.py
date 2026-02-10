@@ -2,14 +2,18 @@
 PKT Generator - Template-based approach using simple_ref.pkt
 """
 import sys
-sys.path.insert(0, '.')
+import os
+
+# Add parent directory to path to import app modules
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.pkt_crypto import decrypt_pkt_data, encrypt_pkt_data
 import re
 
 # 1. Decrypt simple_ref.pkt
 print("📂 Loading simple_ref.pkt template...")
-with open('simple_ref.pkt', 'rb') as f:
+template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'simple_ref.pkt')
+with open(template_path, 'rb') as f:
     encrypted = f.read()
 
 xml_template = decrypt_pkt_data(encrypted).decode('utf-8')

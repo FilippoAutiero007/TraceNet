@@ -1,499 +1,662 @@
 """
 PKT XML Builder - Generates PT 8.2.2 compatible XML structure
 
-This module creates the complete XML structure required by Cisco Packet Tracer 8.2.2.
-The structure is based on reverse-engineering real PT 8.2.2 files.
+This module builds the complete XML structure for Packet Tracer files,
+following the EXACT format from real PT 8.2.2 files (simple_ref.pkt).
 
-Key differences from PT 5.x:
-- <ENGINE> wrapper for device logic
-- <MODULE><SLOT><PORT> hierarchy for interfaces
-- <RUNNINGCONFIG><LINE> for CLI commands
-- <PIXMAPBANK>, <MOVIEBANK>, <SCENARIOSET>, <OPTIONS> sections
-- Complex device metadata (serial numbers, MAC addresses, etc.)
+Key changes from original:
+1. Added SAVEREFID to devices (required for links)
+2. Complete PORT structure with all required fields
+3. Fixed LINK structure using SAVEREFID instead of device names
+4. Added memory addresses and proper XML nesting
 
 References:
-- Real PT 8.2.2 file structure (decrypted)
-- PT XML schema documentation
+- simple_ref.pkt (decrypted) for exact XML structure
+- PT 8.2.2.0400 format specification
 """
 
-import uuid
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Any
 import random
-from typing import List, Dict, Any
-from datetime import datetime
+import logging
 
-
-def generate_mac_address() -> str:
-    """Generate a random Cisco-style MAC address."""
-    return "{:04X}.{:04X}.{:04X}".format(
-        random.randint(0, 0xFFFF),
-        random.randint(0, 0xFFFF),
-        random.randint(0, 0xFFFF)
-    )
-
-
-def generate_serial_number(prefix: str = "PTT0810") -> str:
-    """Generate a PT-style serial number."""
-    suffix = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=5))
-    return f"{prefix}{suffix}-"
-
-
-def generate_save_ref_id() -> str:
-    """Generate PT save-ref-id."""
-    return f"save-ref-id:{random.randint(1000000000000000000, 9999999999999999999)}"
+logger = logging.getLogger(__name__)
 
 
 def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
     """
-    Build complete PT 8.2.2 XML structure.
+    Build complete PT 8.2.2 compatible XML structure.
     
     Args:
-        subnets: List of SubnetResult objects with network configuration
-        config: Dict with routing_protocol, routers, switches, pcs counts
+        subnets: List of subnet objects from network generation
+        config: Configuration dictionary
         
     Returns:
         Complete XML string ready for encryption
     """
+    logger.info("🔨 Building PT 8.2.2 XML structure...")
     
-    # Extract config
-    num_routers = config.get('routers', 1)
-    num_switches = config.get('switches', 2)
-    num_pcs = config.get('pcs', 4)
-    routing_protocol = config.get('routing_protocol', 'STATIC')
+    # Root element
+    root = ET.Element("PACKETTRACER5")
     
-    # Start building XML
-    xml_lines = [
-        '<?xml version="1.0" encoding="utf-8"?>',
-        '<PACKETTRACER5>',
-        '  <VERSION>8.2.2.0400</VERSION>',
-        '',
-        '  <!-- Image and Movie Banks (required but can be empty) -->',
-        '  <PIXMAPBANK>',
-        '    <IMAGE>',
-        '      <IMAGE_PATH></IMAGE_PATH>',
-        '      <IMAGE_CONTENT></IMAGE_CONTENT>',
-        '    </IMAGE>',
-        '  </PIXMAPBANK>',
-        '  <MOVIEBANK/>',
-        '',
-        '  <!-- Main Network Structure -->',
-        '  <NETWORK>',
-        '    <DEVICES>',
-    ]
+    # Version
+    version = ET.SubElement(root, "VERSION")
+    version.text = "8.2.2.0400"
     
-    devices = []
-    device_positions = {}
+    # Empty sections (required by PT)
+    _build_empty_sections(root)
     
-    # Generate Routers
-    for i in range(num_routers):
-        router_name = f"R{i+1}"
-        x_pos = 400 + (i * 200)
-        y_pos = 100
-        device_positions[router_name] = (x_pos, y_pos)
-        
-        # Get router interfaces from subnets
-        router_interfaces = []
-        for subnet in subnets:
-            router_interfaces.append({
-                'name': f'GigabitEthernet0/{len(router_interfaces)}',
-                'ip': subnet.gateway,
-                'mask': subnet.mask,
-                'description': subnet.name
-            })
-        
-        devices.append(build_router_device(router_name, x_pos, y_pos, router_interfaces, routing_protocol))
+    # Network section (devices + links)
+    network = ET.SubElement(root, "NETWORK")
+    devices_elem = ET.SubElement(network, "DEVICES")
+    links_elem = ET.SubElement(network, "LINKS")
     
-    # Generate Switches
-    for i in range(num_switches):
-        switch_name = f"S{i+1}"
-        x_pos = 400 + (i * 150)
-        y_pos = 250
-        device_positions[switch_name] = (x_pos, y_pos)
-        
-        # Get switch IP from corresponding subnet
-        if i < len(subnets):
-            subnet = subnets[i]
-            switch_ip = f"{'.'.join(subnet.network.split('.')[:-1])}.{i+3}"
-            gateway = subnet.gateway
-        else:
-            switch_ip = None
-            gateway = None
-        
-        devices.append(build_switch_device(switch_name, x_pos, y_pos, switch_ip, gateway))
+    # Track device SAVEREFIDs for links
+    device_saverefs = {}
     
-    # Generate PCs
-    pc_per_subnet = num_pcs // len(subnets)
-    pc_index = 0
+    # Build devices
+    logger.info("  📦 Building devices...")
+    for subnet in subnets:
+        for device in subnet.devices:
+            device_info = _extract_device_info(device, subnet)
+            saverefid = _build_device_element(device_info, devices_elem)
+            device_saverefs[device_info["name"]] = saverefid
     
-    for subnet_idx, subnet in enumerate(subnets):
-        for j in range(pc_per_subnet):
-            pc_index += 1
-            pc_name = f"PC{pc_index}"
-            x_pos = 300 + (pc_index * 100)
-            y_pos = 400 + (subnet_idx * 300)
-            device_positions[pc_name] = (x_pos, y_pos)
-            
-            # Calculate PC IP
-            pc_ip = f"{'.'.join(subnet.network.split('.')[:-1])}.{10+j+pc_index}"
-            
-            devices.append(build_pc_device(pc_name, x_pos, y_pos, pc_ip, subnet.mask, subnet.gateway))
+    logger.info(f"  ✅ Built {len(device_saverefs)} devices")
     
-    # Add all devices to XML
-    for device_xml in devices:
-        xml_lines.append(device_xml)
+    # Build links
+    logger.info("  🔗 Building links...")
+    link_count = 0
+    for subnet in subnets:
+        for device in subnet.devices:
+            if hasattr(device, 'connections'):
+                for conn in device.connections:
+                    link_info = _extract_link_info(conn, subnet)
+                    if link_info:
+                        _build_link_element(link_info, links_elem, device_saverefs)
+                        link_count += 1
     
-    xml_lines.extend([
-        '    </DEVICES>',
-        '',
-        '    <!-- Network Links -->',
-        '    <LINKS>',
-    ])
+    logger.info(f"  ✅ Built {link_count} links")
     
-    # Generate Links (simplified topology)
-    link_id = 0
+    # Empty trailing sections
+    ET.SubElement(network, "SHAPETESTS")
+    description = ET.SubElement(network, "DESCRIPTION")
+    description.set("translate", "true")
     
-    # Connect routers to switches
-    for i in range(min(num_routers, num_switches)):
-        router_name = f"R{i+1}"
-        switch_name = f"S{i+1}"
-        xml_lines.append(build_link(link_id, router_name, f"GigabitEthernet0/{i}", switch_name, "FastEthernet0/1"))
-        link_id += 1
+    # Scenario set
+    _build_scenario_set(root)
     
-    # Connect PCs to switches
-    pc_index = 0
-    for switch_idx in range(num_switches):
-        switch_name = f"S{switch_idx+1}"
-        pcs_for_this_switch = pc_per_subnet
-        
-        for port_idx in range(pcs_for_this_switch):
-            pc_index += 1
-            if pc_index > num_pcs:
-                break
-            pc_name = f"PC{pc_index}"
-            xml_lines.append(build_link(link_id, switch_name, f"FastEthernet0/{port_idx+2}", pc_name, "FastEthernet0"))
-            link_id += 1
+    # Options
+    _build_options(root)
     
-    xml_lines.extend([
-        '    </LINKS>',
-        '  </NETWORK>',
-        '',
-        '  <!-- Scenario and Options (required sections) -->',
-        '  <SCENARIOSET>',
-        '    <SCENARIO>',
-        '      <NAME>Default</NAME>',
-        '    </SCENARIO>',
-        '  </SCENARIOSET>',
-        '',
-        '  <OPTIONS>',
-        '    <SHOW_DEVICE_MODEL>true</SHOW_DEVICE_MODEL>',
-        '    <SHOW_DEVICE_NAME>true</SHOW_DEVICE_NAME>',
-        '    <SHOW_PORT_LABELS>true</SHOW_PORT_LABELS>',
-        '    <GRID_ENABLED>false</GRID_ENABLED>',
-        '  </OPTIONS>',
-        '',
-        '</PACKETTRACER5>',
-    ])
+    # Convert to string
+    xml_str = ET.tostring(root, encoding='unicode', method='xml')
     
-    return '\n'.join(xml_lines)
+    # Add XML declaration
+    xml_str = '<?xml version="1.0" encoding="utf-8"?>\n' + xml_str
+    
+    logger.info("✅ XML structure built successfully")
+    return xml_str
 
 
-def build_router_device(name: str, x: int, y: int, interfaces: List[Dict], routing_protocol: str) -> str:
-    """Build Router device XML (PT 8.2.2 structure)."""
+def _build_empty_sections(root: ET.Element):
+    """Build empty required sections (PIXMAPBANK, MOVIEBANK)."""
+    pixmapbank = ET.SubElement(root, "PIXMAPBANK")
+    image = ET.SubElement(pixmapbank, "IMAGE")
+    ET.SubElement(image, "IMAGE_PATH")
+    ET.SubElement(image, "IMAGE_CONTENT")
     
-    mac_base = generate_mac_address()
-    serial = generate_serial_number()
-    save_ref = generate_save_ref_id()
-    
-    # Build running config
-    config_lines = [
-        '!',
-        'version 12.2',
-        'no service timestamps log datetime msec',
-        'no service timestamps debug datetime msec',
-        'no service password-encryption',
-        '!',
-        f'hostname {name}',
-        '!',
-        'ip cef',
-        'no ipv6 cef',
-        '!',
-    ]
-    
-    # Add interface configs
-    for iface in interfaces:
-        config_lines.extend([
-            '!',
-            f'interface {iface["name"]}',
-            f' description {iface["description"]}',
-            f' ip address {iface["ip"]} {iface["mask"]}',
-            ' duplex auto',
-            ' speed auto',
-            ' no shutdown',
-        ])
-    
-    config_lines.extend([
-        '!',
-        'ip classless',
-        '!',
-        'line con 0',
-        '!',
-        'line vty 0 4',
-        ' login',
-        '!',
-        'end',
-    ])
-    
-    running_config_xml = '\n'.join([f'          <LINE>{line}</LINE>' for line in config_lines])
-    
-    # Build interface ports XML
-    ports_xml = []
-    for idx, iface in enumerate(interfaces):
-        port_mac = generate_mac_address()
-        ports_xml.append(f'''
-        <SLOT>
-          <TYPE>ePtRouterModule</TYPE>
-          <MODULE>
-            <TYPE>ePtRouterModule</TYPE>
-            <MODEL>PT-ROUTER-NM-1CGE</MODEL>
-            <PORT>
-              <TYPE>eCopperGigabitEthernet</TYPE>
-              <POWER>true</POWER>
-              <MEDIATYPE>0</MEDIATYPE>
-              <BANDWIDTH>1000000</BANDWIDTH>
-              <FULLDUPLEX>true</FULLDUPLEX>
-              <MACADDRESS>{port_mac}</MACADDRESS>
-              <BIA>{port_mac}</BIA>
-              <UP_METHOD>3</UP_METHOD>
-              <IP>{iface["ip"]}</IP>
-              <SUBNET>{iface["mask"]}</SUBNET>
-            </PORT>
-          </MODULE>
-        </SLOT>''')
-    
-    # Add empty slots
-    for _ in range(10 - len(interfaces)):
-        ports_xml.append('        <SLOT><TYPE>ePtRouterModule</TYPE></SLOT>')
-    
-    xml = f'''
-      <DEVICE>
-        <ENGINE>
-          <TYPE customModel="" model="Router-PT">Router</TYPE>
-          <NAME translate="true">{name}</NAME>
-          <POWER>true</POWER>
-          <DESCRIPTION></DESCRIPTION>
-          <MODULE>
-            <TYPE>eNonRemovableModule</TYPE>
-            <MODEL/>
-{''.join(ports_xml)}
-          </MODULE>
-          <COORD_SETTINGS>
-            <X_COORD>{x}</X_COORD>
-            <Y_COORD>{y}</Y_COORD>
-            <Z_COORD>0</Z_COORD>
-          </COORD_SETTINGS>
-          <SERIALNUMBER>{serial}</SERIALNUMBER>
-          <STARTTIME>730940400000</STARTTIME>
-          <SAVE_REF_ID>{save_ref}</SAVE_REF_ID>
-          <SYS_NAME>{name}</SYS_NAME>
-          <RUNNINGCONFIG>
-{running_config_xml}
-          </RUNNINGCONFIG>
-          <STARTUPCONFIG/>
-          <BUILD_IN_ADDR>{mac_base}</BUILD_IN_ADDR>
-        </ENGINE>
-        <WORKSPACE>
-          <LOGICAL>
-            <X>{x}</X>
-            <Y>{y}</Y>
-          </LOGICAL>
-        </WORKSPACE>
-      </DEVICE>'''
-    
-    return xml
+    ET.SubElement(root, "MOVIEBANK")
 
 
-def build_switch_device(name: str, x: int, y: int, ip: str = None, gateway: str = None) -> str:
-    """Build Switch device XML (PT 8.2.2 structure)."""
+def _extract_device_info(device, subnet) -> Dict:
+    """Extract device information for XML building."""
+    return {
+        "name": device.name,
+        "type": device.device_type,
+        "model": _get_device_model(device.device_type),
+        "interfaces": getattr(device, 'interfaces', []),
+        "config": getattr(device, 'config', {}),
+        "position": getattr(device, 'position', {"x": random.randint(100, 800), "y": random.randint(100, 600)})
+    }
+
+
+def _get_device_model(device_type: str) -> str:
+    """Map device type to PT model name."""
+    type_map = {
+        "router": "Router-PT",
+        "switch": "Switch-PT",
+        "pc": "PC-PT",
+        "server": "Server-PT"
+    }
+    return type_map.get(device_type.lower(), "Router-PT")
+
+
+def _build_device_element(device_info: Dict, devices_elem: ET.Element) -> str:
+    """
+    Build complete DEVICE element with all required fields.
     
-    mac_base = generate_mac_address()
-    serial = generate_serial_number()
-    save_ref = generate_save_ref_id()
+    Returns:
+        SAVEREFID string for use in links
+    """
+    device = ET.SubElement(devices_elem, "DEVICE")
+    engine = ET.SubElement(device, "ENGINE")
     
-    # Build running config
-    config_lines = [
-        '!',
-        'version 12.1',
-        'no service timestamps log datetime msec',
-        'no service timestamps debug datetime msec',
-        'no service password-encryption',
-        '!',
-        f'hostname {name}',
-        '!',
-        'spanning-tree mode pvst',
-        '!',
-    ]
+    # Type
+    type_elem = ET.SubElement(engine, "TYPE")
+    type_elem.set("customModel", "")
+    type_elem.set("model", device_info["model"])
+    type_elem.text = device_info["type"].capitalize()
     
-    # Add 24 FastEthernet ports
-    for i in range(1, 25):
-        config_lines.extend([
-            f'interface FastEthernet0/{i}',
-            '!',
-        ])
+    # Name
+    name = ET.SubElement(engine, "NAME")
+    name.set("translate", "true")
+    name.text = device_info["name"]
     
-    # Add VLAN 1 config
-    if ip and gateway:
-        config_lines.extend([
-            'interface Vlan1',
-            f' ip address {ip} 255.255.255.0',
-            ' no shutdown',
-            '!',
-            f'ip default-gateway {gateway}',
-        ])
+    # Power
+    ET.SubElement(engine, "POWER").text = "true"
+    ET.SubElement(engine, "DESCRIPTION")
+    
+    # MODULE (ports/interfaces)
+    module = ET.SubElement(engine, "MODULE")
+    ET.SubElement(module, "TYPE").text = "eNonRemovableModule"
+    ET.SubElement(module, "MODEL")
+    
+    # Build ports
+    for interface in device_info["interfaces"]:
+        _build_port_in_slot(module, interface, device_info["type"])
+    
+    # CUSTOMVARS
+    ET.SubElement(engine, "CUSTOMVARS").text = "AAAAAA"
+    ET.SubElement(engine, "CUSTOMINTERFACE")
+    ET.SubElement(engine, "SYSCONTACT")
+    ET.SubElement(engine, "SYSLOCATION")
+    
+    # Coordinates
+    coords = ET.SubElement(engine, "COORDSETTINGS")
+    pos = device_info["position"]
+    ET.SubElement(coords, "XCOORD").text = str(pos["x"])
+    ET.SubElement(coords, "YCOORD").text = str(pos["y"])
+    ET.SubElement(coords, "ZCOORD").text = "0"
+    
+    # Serial number
+    serial = f"PTT0810{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(100, 999)}-"
+    ET.SubElement(engine, "SERIALNUMBER").text = serial
+    
+    # Extended attributes
+    extattr = "MTBF=300000;cost=150;power source=0;rack units=2;wattage=35"
+    ET.SubElement(engine, "EXTATTRIBUTES").text = extattr
+    
+    ET.SubElement(engine, "USBPORTCOUNT").text = "0"
+    ET.SubElement(engine, "TEMPLATECREATIONTIME").text = "0"
+    ET.SubElement(engine, "STARTTIME").text = "730940400000"
+    ET.SubElement(engine, "STARTSIMTIME").text = str(random.randint(10000, 30000))
+    
+    # User apps
+    userapps = ET.SubElement(engine, "USERAPPS")
+    ET.SubElement(userapps, "RUNNINGAPPS")
+    ET.SubElement(userapps, "DESKTOPAPPS")
+    
+    # SAVEREFID (CRITICAL for links!)
+    saverefid = f"save-ref-id{random.randint(10**18, 10**19)}"
+    ET.SubElement(engine, "SAVEREFID").text = saverefid
+    
+    # Additional device-specific sections
+    if device_info["type"].lower() == "router":
+        _build_router_sections(engine, device_info)
+    elif device_info["type"].lower() == "switch":
+        _build_switch_sections(engine, device_info)
+    elif device_info["type"].lower() in ["pc", "server"]:
+        _build_pc_sections(engine, device_info)
+    
+    # Workspace (GUI positioning)
+    _build_workspace(engine, device_info)
+    
+    return saverefid
+
+
+def _build_port_in_slot(module: ET.Element, interface: Dict, device_type: str):
+    """Build SLOT > MODULE > PORT structure for an interface."""
+    slot = ET.SubElement(module, "SLOT")
+    
+    # ✅ TYPE diverso per Router vs Switch
+    if device_type.lower() == "switch":
+        ET.SubElement(slot, "TYPE").text = "ePtSwitchModule"
     else:
-        config_lines.extend([
-            'interface Vlan1',
-            ' no ip address',
-            ' shutdown',
-        ])
+        ET.SubElement(slot, "TYPE").text = "ePtRouterModule"
     
-    config_lines.extend([
-        '!',
-        'line con 0',
-        '!',
-        'line vty 0 15',
-        ' login',
-        '!',
-        'end',
-    ])
+    slot_module = ET.SubElement(slot, "MODULE")
     
-    running_config_xml = '\n'.join([f'          <LINE>{line}</LINE>' for line in config_lines])
+    # ✅ MODULE TYPE diverso per Router vs Switch
+    if device_type.lower() == "switch":
+        ET.SubElement(slot_module, "TYPE").text = "ePtSwitchModule"
+    else:
+        ET.SubElement(slot_module, "TYPE").text = "ePtRouterModule"
     
-    # Build 24 switch ports
-    ports_xml = []
-    for i in range(24):
-        port_mac = generate_mac_address()
-        ports_xml.append(f'''
-        <SLOT>
-          <TYPE>ePtSwitchModule</TYPE>
-          <MODULE>
-            <TYPE>ePtSwitchModule</TYPE>
-            <MODEL>PT-SWITCH-NM-1CFE</MODEL>
-            <PORT>
-              <TYPE>eCopperFastEthernet</TYPE>
-              <POWER>true</POWER>
-              <BANDWIDTH>100000</BANDWIDTH>
-              <FULLDUPLEX>true</FULLDUPLEX>
-              <MACADDRESS>{port_mac}</MACADDRESS>
-              <BIA>{port_mac}</BIA>
-            </PORT>
-          </MODULE>
-        </SLOT>''')
+    # ✅ Module model based on interface type AND device type
+    if "FastEthernet" in interface.get("name", ""):
+        if device_type.lower() == "switch":
+            ET.SubElement(slot_module, "MODEL").text = "PT-SWITCH-NM-1CFE"
+        else:
+            ET.SubElement(slot_module, "MODEL").text = "PT-ROUTER-NM-1CFE"
+        port_type = "eCopperFastEthernet"
+    elif "GigabitEthernet" in interface.get("name", ""):
+        if device_type.lower() == "switch":
+            ET.SubElement(slot_module, "MODEL").text = "PT-SWITCH-NM-1CGE"
+        else:
+            ET.SubElement(slot_module, "MODEL").text = "PT-ROUTER-NM-1CGE"
+        port_type = "eCopperGigabitEthernet"
+    elif "Serial" in interface.get("name", ""):
+        # Serial ports only on routers
+        ET.SubElement(slot_module, "MODEL").text = "PT-ROUTER-NM-1S"
+        port_type = "eSerial"
+    else:
+        if device_type.lower() == "switch":
+            ET.SubElement(slot_module, "MODEL").text = "PT-SWITCH-NM-1CFE"
+        else:
+            ET.SubElement(slot_module, "MODEL").text = "PT-ROUTER-NM-1CFE"
+        port_type = "eCopperFastEthernet"
     
-    xml = f'''
-      <DEVICE>
-        <ENGINE>
-          <TYPE customModel="" model="Switch-PT">Switch</TYPE>
-          <NAME translate="true">{name}</NAME>
-          <POWER>true</POWER>
-          <DESCRIPTION></DESCRIPTION>
-          <MODULE>
-            <TYPE>eNonRemovableModule</TYPE>
-            <MODEL/>
-{''.join(ports_xml)}
-          </MODULE>
-          <COORD_SETTINGS>
-            <X_COORD>{x}</X_COORD>
-            <Y_COORD>{y}</Y_COORD>
-            <Z_COORD>0</Z_COORD>
-          </COORD_SETTINGS>
-          <SERIALNUMBER>{serial}</SERIALNUMBER>
-          <STARTTIME>730940400000</STARTTIME>
-          <SAVE_REF_ID>{save_ref}</SAVE_REF_ID>
-          <SYS_NAME>{name}</SYS_NAME>
-          <RUNNINGCONFIG>
-{running_config_xml}
-          </RUNNINGCONFIG>
-          <STARTUPCONFIG/>
-          <BUILD_IN_ADDR>{mac_base}</BUILD_IN_ADDR>
-        </ENGINE>
-        <WORKSPACE>
-          <LOGICAL>
-            <X>{x}</X>
-            <Y>{y}</Y>
-          </LOGICAL>
-        </WORKSPACE>
-      </DEVICE>'''
+    # Build PORT with COMPLETE structure
+    port = ET.SubElement(slot_module, "PORT")
     
-    return xml
+    # Basic port properties
+    ET.SubElement(port, "TYPE").text = port_type
+    ET.SubElement(port, "POWER").text = "true" if interface.get("enabled", True) else "false"
+    ET.SubElement(port, "MEDIATYPE").text = "0"
+    ET.SubElement(port, "PINS").text = "false"
+    
+    # Bandwidth
+    if "Gigabit" in port_type:
+        ET.SubElement(port, "BANDWIDTH").text = "1000000"
+    elif "Fast" in port_type:
+        ET.SubElement(port, "BANDWIDTH").text = "100000"
+    elif "Serial" in port_type:
+        ET.SubElement(port, "BANDWIDTH").text = "1544"
+    else:
+        ET.SubElement(port, "BANDWIDTH").text = "10000"
+    
+    # Duplex settings
+    ET.SubElement(port, "FULLDUPLEX").text = "true"
+    ET.SubElement(port, "AUTONEGOTIATEBANDWIDTH").text = "true"
+    ET.SubElement(port, "AUTONEGOTIATEDUPLEX").text = "true"
+    
+    # MAC address
+    mac = interface.get("mac", _generate_mac())
+    ET.SubElement(port, "MACADDRESS").text = mac
+    ET.SubElement(port, "BIA").text = mac
+    
+    # Clock
+    ET.SubElement(port, "CLOCKRATE").text = "2000000"
+    ET.SubElement(port, "CLOCKRATEFLAG").text = "false"
+    ET.SubElement(port, "DESCRIPTION")
+    
+    # Wireless channels (always 0 for wired)
+    ET.SubElement(port, "CHANNEL").text = "0"
+    ET.SubElement(port, "CHANNEL5GHZ").text = "0"
+    ET.SubElement(port, "COVERAGERANGE").text = "0"
+    
+    # Saved settings
+    ET.SubElement(port, "SAVEDFULLDUPLEX").text = "false"
+    
+    # UP method (3 = static IP configured, 5 = no IP)
+    has_ip = bool(interface.get("ip"))
+    ET.SubElement(port, "UPMETHOD").text = "3" if has_ip else "5"
+    
+    # IP configuration
+    ET.SubElement(port, "IP").text = interface.get("ip", "")
+    ET.SubElement(port, "SUBNET").text = interface.get("subnet", "")
+    ET.SubElement(port, "PORTGATEWAY")
+    ET.SubElement(port, "PORTDNS")
+    ET.SubElement(port, "PORTDHCPENABLE").text = "false"
+    
+    # IPv6 configuration
+    ET.SubElement(port, "NDSUPPRESSED").text = "false"
+    ET.SubElement(port, "NDIPV6DNSADDRESSES")
+    ET.SubElement(port, "TIMEOUT").text = "14400000"
+    ET.SubElement(port, "PCFIREWALL").text = "false"
+    ET.SubElement(port, "PCIPV6FIREWALL").text = "false"
+    ET.SubElement(port, "IPV6ENABLED").text = "false"
+    ET.SubElement(port, "IPV6ADDRESSAUTOCONFIG").text = "false"
+    ET.SubElement(port, "IPV6PORTGATEWAY")
+    ET.SubElement(port, "IPV6PORTDNS")
+    ET.SubElement(port, "IPV6LINKLOCAL")
+    
+    # Generate IPv6 link-local from MAC
+    mac_hex = mac.replace(".", "")
+    ipv6_ll = f"FE80:{mac_hex[:4]}:FFFF:{mac_hex[4:8]}:{mac_hex[8:12]}"
+    ET.SubElement(port, "IPV6DEFAULTLINKLOCAL").text = ipv6_ll
+    
+    ET.SubElement(port, "IPV6PORTDHCPENABLED").text = "false"
+    ET.SubElement(port, "IPV6ADDRESSES")
+    ET.SubElement(port, "IPUNNUMBERED")
+    ET.SubElement(port, "DHCPSERVERIP").text = "0.0.0.0"
+    ET.SubElement(port, "MANAGEMENTINTERFACE").text = "false"
 
 
-def build_pc_device(name: str, x: int, y: int, ip: str, mask: str, gateway: str) -> str:
-    """Build PC device XML (PT 8.2.2 structure)."""
-    
-    mac = generate_mac_address()
-    serial = generate_serial_number()
-    save_ref = generate_save_ref_id()
-    
-    xml = f'''
-      <DEVICE>
-        <ENGINE>
-          <TYPE customModel="" model="PC-PT">Pc</TYPE>
-          <NAME translate="true">{name}</NAME>
-          <POWER>true</POWER>
-          <DESCRIPTION></DESCRIPTION>
-          <MODULE>
-            <TYPE>eNonRemovableModule</TYPE>
-            <MODEL/>
-            <SLOT>
-              <TYPE>ePtHostModule</TYPE>
-              <MODULE>
-                <TYPE>ePtHostModule</TYPE>
-                <MODEL>PT-HOST-NM-1CFE</MODEL>
-                <PORT>
-                  <TYPE>eCopperFastEthernet</TYPE>
-                  <POWER>true</POWER>
-                  <BANDWIDTH>100000</BANDWIDTH>
-                  <FULLDUPLEX>true</FULLDUPLEX>
-                  <MACADDRESS>{mac}</MACADDRESS>
-                  <BIA>{mac}</BIA>
-                  <IP>{ip}</IP>
-                  <SUBNET>{mask}</SUBNET>
-                  <PORT_GATEWAY>{gateway}</PORT_GATEWAY>
-                </PORT>
-              </MODULE>
-            </SLOT>
-          </MODULE>
-          <COORD_SETTINGS>
-            <X_COORD>{x}</X_COORD>
-            <Y_COORD>{y}</Y_COORD>
-            <Z_COORD>0</Z_COORD>
-          </COORD_SETTINGS>
-          <SERIALNUMBER>{serial}</SERIALNUMBER>
-          <STARTTIME>730940400000</STARTTIME>
-          <SAVE_REF_ID>{save_ref}</SAVE_REF_ID>
-          <SYS_NAME>{name}</SYS_NAME>
-          <GATEWAY>{gateway}</GATEWAY>
-        </ENGINE>
-        <WORKSPACE>
-          <LOGICAL>
-            <X>{x}</X>
-            <Y>{y}</Y>
-          </LOGICAL>
-        </WORKSPACE>
-      </DEVICE>'''
-    
-    return xml
+def _generate_mac() -> str:
+    """Generate random MAC address in Cisco format (XXXX.XXXX.XXXX)."""
+    return f"{random.randint(0, 0xFFFF):04X}.{random.randint(0, 0xFFFF):04X}.{random.randint(0, 0xFFFF):04X}"
 
 
-def build_link(link_id: int, from_dev: str, from_port: str, to_dev: str, to_port: str) -> str:
-    """Build Link XML (simplified PT 8.2.2 structure)."""
+def _build_router_sections(engine: ET.Element, device_info: Dict):
+    """Build router-specific sections (config, file manager, etc)."""
+    ET.SubElement(engine, "SYSNAME").text = device_info["name"]
     
-    xml = f'''      <LINK>
-        <ID>{link_id}</ID>
-        <TYPE>eCopper</TYPE>
-        <FROM_DEVICE>{from_dev}</FROM_DEVICE>
-        <FROM_PORT>{from_port}</FROM_PORT>
-        <TO_DEVICE>{to_dev}</TO_DEVICE>
-        <TO_PORT>{to_port}</TO_PORT>
-      </LINK>'''
+    # Running config
+    runconfig = ET.SubElement(engine, "RUNNINGCONFIG")
+    config_lines = device_info.get("config", {}).get("lines", [])
+    if not config_lines:
+        config_lines = [
+            "!",
+            "version 12.2",
+            "no service timestamps log datetime msec",
+            "no service timestamps debug datetime msec",
+            "no service password-encryption",
+            "!",
+            f"hostname {device_info['name']}",
+            "!",
+            "!",
+            "ip cef",
+            "no ipv6 cef",
+            "!",
+            "!",
+            "line con 0",
+            "!",
+            "line aux 0",
+            "!",
+            "line vty 0 4",
+            " login",
+            "!",
+            "!",
+            "end"
+        ]
     
-    return xml
+    for line in config_lines:
+        line_elem = ET.SubElement(runconfig, "LINE")
+        line_elem.text = line
+    
+    # Startup config
+    ET.SubElement(engine, "STARTUPCONFIG")
+    
+    # Command set
+    ET.SubElement(engine, "CURRENTCOMMANDSET").text = "pt12.2"
+    
+    # File manager (minimal)
+    _build_file_manager(engine, "Router")
+
+
+def _build_switch_sections(engine: ET.Element, device_info: Dict):
+    """Build switch-specific sections."""
+    ET.SubElement(engine, "SYSNAME").text = device_info["name"]
+    
+    # Running config
+    runconfig = ET.SubElement(engine, "RUNNINGCONFIG")
+    config_lines = [
+        "!",
+        "version 12.1",
+        "no service timestamps log datetime msec",
+        "no service timestamps debug datetime msec",
+        "no service password-encryption",
+        "!",
+        f"hostname {device_info['name']}",
+        "!",
+        "spanning-tree mode pvst",
+        "spanning-tree extend system-id",
+        "!",
+        "interface Vlan1",
+        " no ip address",
+        " shutdown",
+        "!",
+        "line con 0",
+        "!",
+        "line vty 0 4",
+        " login",
+        "line vty 5 15",
+        " login",
+        "!",
+        "end"
+    ]
+    
+    for line in config_lines:
+        line_elem = ET.SubElement(runconfig, "LINE")
+        line_elem.text = line
+    
+    ET.SubElement(engine, "STARTUPCONFIG")
+    ET.SubElement(engine, "CURRENTCOMMANDSET").text = "pt12.1EA4"
+    
+    # VLANs
+    vlans = ET.SubElement(engine, "VLANS")
+    vlan = ET.SubElement(vlans, "VLAN")
+    vlan.set("name", "default")
+    vlan.set("number", "1")
+    vlan.set("rspan", "0")
+    
+    # VTP
+    vtp = ET.SubElement(engine, "VTP")
+    ET.SubElement(vtp, "DOMAINNAME")
+    ET.SubElement(vtp, "MODE").text = "0"
+    ET.SubElement(vtp, "VERSION").text = "1"
+    ET.SubElement(vtp, "PASSWORD")
+    ET.SubElement(vtp, "CONFIGREVISION").text = "0"
+    
+    _build_file_manager(engine, "Switch")
+
+
+def _build_pc_sections(engine: ET.Element, device_info: Dict):
+    """Build PC/Server-specific sections."""
+    ET.SubElement(engine, "SYSNAME").text = device_info["name"]
+    
+    # Gateway
+    gateway = device_info.get("config", {}).get("gateway", "")
+    ET.SubElement(engine, "GATEWAY").text = gateway
+    
+    # DNS client
+    dns = ET.SubElement(engine, "DNSCLIENT")
+    ET.SubElement(dns, "SERVERIP")
+    ET.SubElement(dns, "SERVERIPV6")
+    
+    # DHCP client
+    dhcp = ET.SubElement(engine, "DHCPCLIENT")
+    ET.SubElement(dhcp, "PORTDATAMAP")
+
+
+def _build_file_manager(engine: ET.Element, device_type: str):
+    """Build file manager section."""
+    fm = ET.SubElement(engine, "FILEMANAGER")
+    
+    # Root directory
+    root_file = ET.SubElement(fm, "FILE")
+    root_file.set("class", "CDirectory")
+    ET.SubElement(root_file, "FILENUMBER").text = "0"
+    ET.SubElement(root_file, "NAME")
+    ET.SubElement(root_file, "DATETIME").text = "0"
+    ET.SubElement(root_file, "PERMISSION").text = "6"
+    ET.SubElement(root_file, "FILECONTENT")
+    
+    files = ET.SubElement(root_file, "FILES")
+    
+    # Flash filesystem
+    flash = ET.SubElement(files, "FILE")
+    flash.set("class", "CFileSystem")
+    ET.SubElement(flash, "FILENUMBER").text = "0"
+    ET.SubElement(flash, "NAME").text = "flash"
+    ET.SubElement(flash, "DATETIME").text = "0"
+    ET.SubElement(flash, "PERMISSION").text = "6"
+    ET.SubElement(flash, "FILECONTENT")
+    
+    flash_files = ET.SubElement(flash, "FILES")
+    
+    # IOS file
+    ios = ET.SubElement(flash_files, "FILE")
+    ios.set("class", "CFile")
+    ET.SubElement(ios, "FILENUMBER").text = "1"
+    
+    if device_type == "Router":
+        ET.SubElement(ios, "NAME").text = "pt1000-i-mz.122-28.bin"
+    else:
+        ET.SubElement(ios, "NAME").text = "pt3000-i6q4l2-mz.121-22.EA4.bin"
+    
+    ET.SubElement(ios, "DATETIME").text = "0"
+    ET.SubElement(ios, "PERMISSION").text = "6"
+    
+    ios_content = ET.SubElement(ios, "FILECONTENT")
+    ios_content.set("class", "CIosFileContent")
+    ET.SubElement(ios_content, "DEVICETYPE").text = device_type
+    ET.SubElement(ios_content, "SETNAME").text = "pt12.2" if device_type == "Router" else "pt12.1EA4"
+    
+    ET.SubElement(flash_files, "FILECOUNTER").text = "1"
+    ET.SubElement(flash_files, "CAPACITY").text = "64016384"
+    
+    ET.SubElement(files, "FILECOUNTER").text = "1"
+    
+    # Config register
+    ET.SubElement(fm, "CONFIGREGISTER").text = "8450" if device_type == "Router" else "15"
+    ET.SubElement(fm, "NEXTCONFIGREGISTER").text = "8450" if device_type == "Router" else "15"
+    
+    boot_file = f"flash:pt1000-i-mz.122-28.bin" if device_type == "Router" else "flash:pt3000-i6q4l2-mz.121-22.EA4.bin"
+    ET.SubElement(fm, "CURRENTBOOTFILE").text = boot_file
+    
+    ET.SubElement(fm, "CONFIGBOOTFILES")
+    
+    # Built-in address
+    builtin = _generate_mac()
+    ET.SubElement(fm, "BUILDINADDR").text = builtin
+
+
+def _build_workspace(engine: ET.Element, device_info: Dict):
+    """Build WORKSPACE section for GUI positioning."""
+    workspace = ET.SubElement(engine, "WORKSPACE")
+    
+    # Logical view
+    logical = ET.SubElement(workspace, "LOGICAL")
+    pos = device_info["position"]
+    ET.SubElement(logical, "X").text = str(pos["x"])
+    ET.SubElement(logical, "Y").text = str(pos["y"])
+    ET.SubElement(logical, "DEVCLUSTERID").text = "1-1"
+    ET.SubElement(logical, "CUSTOMIMAGELOGICAL")
+    ET.SubElement(logical, "CUSTOMIMAGEPHYSICAL")
+    ET.SubElement(logical, "MEMADDR").text = str(random.randint(10**12, 10**13))
+    ET.SubElement(logical, "DEVADDR").text = str(random.randint(10**12, 10**13))
+    
+    # Physical view
+    physical_id = f"{random.randint(10000000, 99999999):08x}-{random.randint(1000, 9999):04x}-{random.randint(1000, 9999):04x}-{random.randint(1000, 9999):04x}-{random.randint(100000000000, 999999999999):012x}"
+    ET.SubElement(logical, "PHYSICAL").text = physical_id
+
+
+def _extract_link_info(connection, subnet) -> Dict:
+    """Extract link information from connection object."""
+    # This depends on your connection data structure
+    # Adjust according to your actual implementation
+    return {
+        "from_device": connection.get("from_device"),
+        "from_port": connection.get("from_port"),
+        "to_device": connection.get("to_device"),
+        "to_port": connection.get("to_port"),
+        "type": connection.get("type", "copper")
+    }
+
+
+def _build_link_element(link_info: Dict, links_elem: ET.Element, device_saverefs: Dict):
+    """
+    Build complete LINK element using SAVEREFID references.
+    
+    Args:
+        link_info: Link connection information
+        links_elem: Parent LINKS element
+        device_saverefs: Dict mapping device names to SAVEREFIDs
+    """
+    link = ET.SubElement(links_elem, "LINK")
+    
+    # Type
+    link_type = "eCopper" if "copper" in link_info.get("type", "").lower() else "eFiber"
+    ET.SubElement(link, "TYPE").text = link_type
+    
+    # Cable
+    cable = ET.SubElement(link, "CABLE")
+    ET.SubElement(cable, "LENGTH").text = "1"
+    ET.SubElement(cable, "FUNCTIONAL").text = "true"
+    
+    # FROM (use SAVEREFID!)
+    from_device = link_info["from_device"]
+    if from_device not in device_saverefs:
+        logger.warning(f"⚠️  Device '{from_device}' not found in SAVEREFID map!")
+        return
+    
+    ET.SubElement(link, "FROM").text = device_saverefs[from_device]
+    port_from = ET.SubElement(link, "PORT")
+    port_from.text = link_info["from_port"]
+    
+    # TO (use SAVEREFID!)
+    to_device = link_info["to_device"]
+    if to_device not in device_saverefs:
+        logger.warning(f"⚠️  Device '{to_device}' not found in SAVEREFID map!")
+        return
+    
+    ET.SubElement(link, "TO").text = device_saverefs[to_device]
+    port_to = ET.SubElement(link, "PORT")
+    port_to.text = link_info["to_port"]
+    
+    # Memory addresses (random but consistent)
+    ET.SubElement(link, "FROMDEVICEMEMADDR").text = str(random.randint(10**12, 10**13))
+    ET.SubElement(link, "TODEVICEMEMADDR").text = str(random.randint(10**12, 10**13))
+    ET.SubElement(link, "FROMPORTMEMADDR").text = str(random.randint(10**12, 10**13))
+    ET.SubElement(link, "TOPORTMEMADDR").text = str(random.randint(10**12, 10**13))
+    
+    # Visual settings
+    ET.SubElement(link, "GEOVIEWCOLOR").text = "6ba72e"
+    ET.SubElement(link, "ISMANAGEDRINRACKVIEW").text = "false"
+    
+    # Cable type (determines straight-through vs crossover)
+    cable_type = ET.SubElement(link, "TYPE")
+    cable_type.text = "eStraightThrough"
+
+
+def _build_scenario_set(root: ET.Element):
+    """Build SCENARIOSET section."""
+    scenarioset = ET.SubElement(root, "SCENARIOSET")
+    scenario = ET.SubElement(scenarioset, "SCENARIO")
+    
+    name = ET.SubElement(scenario, "NAME")
+    name.set("translate", "true")
+    name.text = "Scenario 0"
+    
+    desc = ET.SubElement(scenario, "DESCRIPTION")
+    desc.set("translate", "true")
+    desc.text = ""
+
+
+def _build_options(root: ET.Element):
+    """Build OPTIONS section with default PT settings."""
+    options = ET.SubElement(root, "OPTIONS")
+    
+    ET.SubElement(options, "LANGUAGE").text = "default.ptl"
+    ET.SubElement(options, "ANIMATION").text = "false"
+    ET.SubElement(options, "DISABLETEXTTOSPEECH").text = "false"
+    ET.SubElement(options, "LOGICALALIGN").text = "false"
+    ET.SubElement(options, "PHYSICALALIGN").text = "false"
+    ET.SubElement(options, "SOUND").text = "false"
+    ET.SubElement(options, "TELEPHONESOUND").text = "false"
+    ET.SubElement(options, "DOCK").text = "true"
+    ET.SubElement(options, "LOGGING").text = "false"
+    ET.SubElement(options, "PASS")
+    ET.SubElement(options, "CONFIGPATH").text = "."
+    ET.SubElement(options, "MODELSHOWN").text = "true"
+    ET.SubElement(options, "LINKLIGHTSSHOWN").text = "true"
+    ET.SubElement(options, "PORTSHOWN").text = "true"
+    
+    ET.SubElement(options, "BACKGROUNDS")
+    
+    # Hide settings
+    ET.SubElement(options, "HIDEPHYSICAL").text = "false"
+    ET.SubElement(options, "HIDEATTRIBUTES").text = "false"
+    ET.SubElement(options, "HIDECONFIG").text = "false"
+    ET.SubElement(options, "HIDECONFIGOFROUTERANDSWITCH").text = "false"
+    ET.SubElement(options, "HIDECLIOFROUTERANDSWITCH").text = "false"
+    ET.SubElement(options, "HIDESERVICES").text = "false"
+    ET.SubElement(options, "HIDECLI").text = "false"
+    ET.SubElement(options, "HIDEDESKTOP").text = "false"
+    ET.SubElement(options, "HIDEGUI").text = "false"
+    ET.SubElement(options, "HIDEDEVICELABEL").text = "false"
+    ET.SubElement(options, "BUFFERFILTEREDEVENTSONLY").text = "false"
+    ET.SubElement(options, "ACCESSIBLE").text = "false"
