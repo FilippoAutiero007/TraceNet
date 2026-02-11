@@ -160,15 +160,15 @@ def _is_network_related(user_input: str) -> bool:
 async def parse_network_request(user_input: str, current_state: dict[str, Any]) -> ParseNetworkResponse:
     """Parse user text into strict normalized JSON intent contract."""
     if not _is_network_related(user_input):
-        return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json_payload={})
+        return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
 
     api_key = os.environ.get("MISTRAL_API_KEY")
     if not api_key:
         merged = _merge_with_state({}, current_state)
         missing, normalized = _validate_normalized_json(merged)
         if missing:
-            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json_payload={})
-        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json_payload=normalized)
+            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json={})
+        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json=normalized)
 
     client = Mistral(api_key=api_key)
 
@@ -200,30 +200,16 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
         missing, normalized = _validate_normalized_json(merged)
 
         if data.get("intent") == ParseIntent.NOT_NETWORK.value:
-            return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json_payload={})
+            return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
 
         if missing:
-            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json_payload={})
+            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json={})
 
-        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json_payload=normalized)
+        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json=normalized)
 
     except json.JSONDecodeError as exc:
-        logger.error("Invalid JSON from parser model: %s", exc, exc_info=True)
-        return ParseNetworkResponse(
-            intent=ParseIntent.INCOMPLETE,
-            missing=["base_network", "routers", "switches", "pcs", "routing_protocol"],
-            json_payload={
-                "error": "NLP service returned invalid JSON",
-                "fallback_message": "Please provide complete parameters manually",
-            },
-        )
+        logger.error("Invalid JSON from parser model: %s", exc)
+        raise ValueError(f"AI returned invalid JSON: {exc}")
     except Exception as exc:
         logger.error("Parser failure: %s", exc, exc_info=True)
-        return ParseNetworkResponse(
-            intent=ParseIntent.INCOMPLETE,
-            missing=["base_network", "routers", "switches", "pcs", "routing_protocol"],
-            json_payload={
-                "error": "NLP service temporarily unavailable",
-                "fallback_message": "Please provide complete parameters manually",
-            },
-        )
+        raise ValueError(f"Failed to parse network request: {exc}")

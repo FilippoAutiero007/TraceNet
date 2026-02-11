@@ -2,8 +2,8 @@
 Pydantic models for NetTrace API
 """
 
-import ipaddress
-import re
+from pydantic import BaseModel, Field, model_validator, ConfigDict
+from typing import List, Optional, Dict, Any
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -77,59 +77,42 @@ class ParseIntent(str, Enum):
 
 class ParseNetworkRequest(BaseModel):
     """Request body for /api/parse-network-request endpoint"""
-    user_input: str = Field(..., min_length=1, max_length=5000, description="User natural language input")
-    current_state: Dict[str, Any] = Field(default_factory=dict, description="Already collected conversation fields")
+    user_input: str = Field(..., min_length=1, description="User natural language input")
+    current_state: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Already collected conversation fields"
+    )
 
 
 class NormalizedSubnet(BaseModel):
     """Normalized subnet entry used by backend generation."""
-    name: str = Field(..., min_length=1, max_length=64)
-    required_hosts: int = Field(..., ge=1, le=4094)
-
-    @field_validator("name")
-    @classmethod
-    def validate_subnet_name(cls, value: str) -> str:
-        if not re.match(r"^[A-Za-z0-9_-]+$", value):
-            raise ValueError("Subnet name must contain only letters, numbers, underscore or dash")
-        return value
+    name: str = Field(..., min_length=1)
+    required_hosts: int = Field(..., ge=1)
 
 
 class NormalizedNetworkRequest(BaseModel):
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
-
-    base_network: str = Field(
-        ...,
-        pattern=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$",
-        description="Must be valid CIDR notation",
-    )
-    routers: int = Field(..., ge=1, le=5, description="1-5 routers max")
-    switches: int = Field(..., ge=0, le=10, description="0-10 switches max")
-    pcs: int = Field(..., ge=1, le=100, description="1-100 PCs max")
-    routing_protocol: str = Field(
-        ...,
-        pattern=r"^(STATIC|RIP|OSPF|EIGRP)$",
-        description="Must be valid routing protocol",
-    )
-    subnets: List[NormalizedSubnet] = Field(default_factory=list, max_length=10, description="Max 10 subnets")
-
-    @field_validator("base_network")
-    @classmethod
-    def validate_cidr(cls, value: str) -> str:
-        try:
-            ipaddress.ip_network(value, strict=False)
-        except ValueError as exc:
-            raise ValueError(f"Invalid CIDR notation: {exc}") from exc
-        return value
+    base_network: str = Field(..., description="Base network in CIDR notation")
+    routers: int = Field(..., ge=1)
+    switches: int = Field(..., ge=0)
+    pcs: int = Field(..., ge=1)
+    routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
+    subnets: List[NormalizedSubnet] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_coherence(self):
+        allowed_protocols = {"STATIC", "RIP", "OSPF", "EIGRP"}
         protocol = self.routing_protocol.strip().upper()
+        if protocol not in allowed_protocols:
+            raise ValueError(f"routing_protocol must be one of {sorted(allowed_protocols)}")
         self.routing_protocol = protocol
 
         if self.subnets:
             total_subnet_hosts = sum(subnet.required_hosts for subnet in self.subnets)
             if total_subnet_hosts < self.pcs:
-                raise ValueError("Total subnet required_hosts must be >= pcs for coherent host allocation")
+                raise ValueError(
+                    "Total subnet required_hosts must be >= pcs for coherent host allocation"
+                )
         return self
 
 
@@ -140,7 +123,6 @@ class ParseNetworkResponse(BaseModel):
     json_payload: Dict[str, Any] = Field(default_factory=dict, alias="json", serialization_alias="json")
 
     model_config = ConfigDict(populate_by_name=True)
-
 
 class PktGenerateResponse(BaseModel):
     """Response from /api/generate-pkt endpoint with .pkt file info"""
