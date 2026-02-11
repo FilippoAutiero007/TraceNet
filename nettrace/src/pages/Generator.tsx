@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiClient, getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
 import { DownloadResult } from '@/components/DownloadResult';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -31,36 +32,40 @@ interface GenerateResponse {
   subnets?: SubnetInfo[];
 }
 
+interface ParseResponse {
+  intent: 'not_network' | 'incomplete' | 'complete';
+  missing: string[];
+  json: Record<string, unknown>;
+}
+
 export function Generator() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [conversationState, setConversationState] = useState<Record<string, unknown>>({});
 
   const handleGenerate = async (description: string) => {
     setIsGenerating(true);
     setError(null);
     setResult(null);
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+    const apiBaseUrl = getApiBaseUrl();
 
     try {
-      const response = await fetch(`${API_URL}/api/generate-pkt`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ description }),
-      });
+      const parseData = (await apiClient.parseNetworkRequest(description, conversationState)) as ParseResponse;
 
-      if (!response.ok) {
-        if (response.status === 0 || response.status >= 500) {
-          throw new Error('Cannot connect to server. Make sure backend is running on port 8000.');
-        }
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.detail || `Server error: ${response.status}`);
+      if (parseData.intent === 'not_network') {
+        throw new Error('La richiesta non sembra relativa alla generazione di una rete.');
       }
 
-      const data: GenerateResponse = await response.json();
+      if (parseData.intent === 'incomplete') {
+        const missingList = parseData.missing.join(', ');
+        throw new Error(`Richiesta incompleta. Campi mancanti: ${missingList}`);
+      }
+
+      setConversationState(parseData.json);
+
+      const data = (await apiClient.generateNetwork(parseData.json)) as GenerateResponse;
 
       if (data.success && data.pkt_download_url) {
         setResult(data);
@@ -70,7 +75,7 @@ export function Generator() {
     } catch (err) {
       console.error('Generation error:', err);
       if (err instanceof TypeError && err.message.includes('fetch')) {
-        setError('Cannot connect to server. Make sure the backend is running at ' + API_URL);
+        setError('Cannot connect to server. Make sure the backend is running at ' + apiBaseUrl);
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
@@ -89,23 +94,17 @@ export function Generator() {
   return (
     <div className="min-h-screen bg-slate-950 py-12 px-4">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-white mb-4">
-            Network Generator
-          </h1>
+          <h1 className="text-4xl font-bold text-white mb-4">Network Generator</h1>
           <p className="text-slate-400 text-lg">
             Generate Cisco Packet Tracer networks from natural language descriptions
           </p>
         </div>
 
-        {/* Main Content - Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left Column - Input */}
           <div className="space-y-6">
             <NetworkInput onGenerate={handleGenerate} isGenerating={isGenerating} />
-            
-            {/* Error Display */}
+
             {error && (
               <Alert variant="destructive" className="bg-red-950 border-red-900">
                 <AlertCircle className="h-4 w-4" />
@@ -125,7 +124,6 @@ export function Generator() {
             )}
           </div>
 
-          {/* Right Column - Result */}
           <div className="space-y-6">
             {result && result.success && result.config_summary && result.subnets ? (
               <DownloadResult data={result as any} />

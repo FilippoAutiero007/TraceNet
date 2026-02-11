@@ -1,312 +1,333 @@
-"""
-Generate router - API endpoints for network generation and .pkt file download
-"""
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-from app.models.schemas import GenerateRequest, GenerateResponse, PktGenerateRequest, PktGenerateResponse
-from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
-from app.services.nlp_parser import parse_network_description
-from app.services.subnet_calculator import calculate_vlsm
-from app.services.pkt_generator import generate_cisco_config
-from app.services.pkt_file_generator import save_pkt_file
+"""Generate router - parser endpoint + deterministic PKT generation endpoints."""
+
 import os
+import re
+import shutil
+import time
+import uuid
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import unquote
 from threading import Lock
 
-# Global lock per proteggere generazione file .pkt (FIX B2: previene race condition)
-_pkt_generation_lock = Lock()
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+
+from app.config import settings
+from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
+from app.models.schemas import (
+    DeviceConfig,
+    GenerateResponse,
+    NetworkConfig,
+    NormalizedNetworkRequest,
+    ParseNetworkRequest,
+    ParseNetworkResponse,
+    PktGenerateResponse,
+    RoutingProtocol,
+    SubnetRequest,
+)
+from app.services.nlp_parser import parse_network_request
+from app.services.pkt_file_generator import get_template_path, save_pkt_file
+from app.services.pkt_generator import generate_cisco_config
+from app.services.subnet_calculator import calculate_vlsm
+from app.utils.logger import setup_logger
+from app.utils.rate_limiter import limiter
+
+logger = setup_logger("tracenet.router")
+
+_REQUEST_LOCKS: dict[str, Lock] = defaultdict(Lock)
+_LOCKS_CLEANUP_LOCK = Lock()
+FILENAME_REGEX = re.compile(r"^[\w\-.]+$")
 
 router = APIRouter(tags=["generate"])
 
-@router.post("/generate", response_model=GenerateResponse)
-async def generate_network(request: GenerateRequest):
-    """
-    Generate Cisco network configuration from natural language description.
-    
-    Returns CLI configuration and subnet details (JSON response).
-    For downloadable .pkt file, use /generate-pkt endpoint.
-    """
+
+def get_request_lock(request_id: str) -> Lock:
+    with _LOCKS_CLEANUP_LOCK:
+        return _REQUEST_LOCKS[request_id]
+
+
+def release_request_lock(request_id: str):
+    with _LOCKS_CLEANUP_LOCK:
+        if request_id in _REQUEST_LOCKS:
+            del _REQUEST_LOCKS[request_id]
+
+
+def cleanup_old_files(ttl_seconds: int = 3600):
+    output_dir = str(settings.output_dir)
+    if not os.path.exists(output_dir):
+        return
+
+    cutoff_time = time.time() - ttl_seconds
+    for item in os.listdir(output_dir):
+        item_path = os.path.join(output_dir, item)
+        try:
+            if os.path.getmtime(item_path) < cutoff_time:
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+        except Exception as exc:
+            logger.warning("Failed to cleanup %s: %s", item_path, exc)
+
+
+def _validate_filename(filename: str):
+    decoded = unquote(filename)
+    if not FILENAME_REGEX.fullmatch(decoded):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if '..' in decoded or '/' in decoded or '\\' in decoded:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+
+def _resolve_safe_path(output_dir: Path, filename: str) -> Path:
+    decoded = unquote(filename)
+    _validate_filename(decoded)
+    filepath = (output_dir / decoded).resolve()
     try:
-        # Step 1: Parse natural language with Mistral AI
-        network_config = await parse_network_description(request.description)
-        
-        if not network_config:
-            return GenerateResponse(
-                success=False,
-                error="Could not parse network description. Please be more specific."
-            )
-        
-        # Step 2: Calculate VLSM subnets
-        subnets = calculate_vlsm(
-            network_config.base_network,
-            network_config.subnets
-        )
-        
-        # Step 3: Generate Cisco CLI config
+        filepath.relative_to(output_dir.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Access denied") from exc
+    return filepath
+
+
+def _to_network_config(request: NormalizedNetworkRequest) -> tuple[NetworkConfig, list[SubnetRequest]]:
+    subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
+    routing = RoutingProtocol.STATIC if request.routing_protocol == "STATIC" else RoutingProtocol(request.routing_protocol)
+    config = NetworkConfig(
+        base_network=request.base_network,
+        subnets=subnets_input,
+        devices=DeviceConfig(routers=request.routers, switches=request.switches, pcs=request.pcs),
+        routing_protocol=routing,
+    )
+    return config, subnets_input
+
+
+@router.post("/parse-network-request", response_model=ParseNetworkResponse)
+@limiter.limit("30/minute")
+async def parse_network_endpoint(http_request: Request, request: ParseNetworkRequest):
+    del http_request
+    return await parse_network_request(request.user_input, request.current_state)
+
+
+@router.post("/generate", response_model=GenerateResponse)
+@limiter.limit("20/minute")
+async def generate_network(http_request: Request, request: NormalizedNetworkRequest):
+    del http_request
+    try:
+        network_config, _ = _to_network_config(request)
+        subnets = calculate_vlsm(network_config.base_network, network_config.subnets)
         cli_script = generate_cisco_config(network_config, subnets)
-        
-        return GenerateResponse(
-            success=True,
-            config_json=network_config,
-            subnets=subnets,
-            cli_script=cli_script
-        )
-        
-    except ValueError as e:
-        return GenerateResponse(
-            success=False,
-            error=f"Validation error: {str(e)}"
-        )
-    except Exception as e:
-        return GenerateResponse(
-            success=False,
-            error=f"Generation failed: {str(e)}"
-        )
+        return GenerateResponse(success=True, config_json=network_config, subnets=subnets, cli_script=cli_script)
+    except ValueError as exc:
+        return GenerateResponse(success=False, error=f"Validation error: {exc}")
+    except Exception as exc:
+        return GenerateResponse(success=False, error=f"Generation failed: {exc}")
+
 
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
-async def generate_pkt_file(request: GenerateRequest):
-    """
-    Generate Cisco Packet Tracer .pkt file from natural language description.
-    
-    Returns:
-    - pkt_path: Path to download the .pkt file
-    - xml_path: Path to download the debug .xml file
-    - download_url: URL to download the .pkt file
-    
-    Note: .pkt files are BINARY (XML compressed with GZIP), not text files!
-    """
+@limiter.limit(settings.max_requests_per_minute)
+async def generate_pkt_file(
+    http_request: Request,
+    request: NormalizedNetworkRequest,
+    background_tasks: BackgroundTasks,
+):
+    del http_request
+    request_id = str(uuid.uuid4())
+    lock = get_request_lock(request_id)
+
     try:
-        # Step 1: Parse natural language with Mistral AI
-        network_config = await parse_network_description(request.description)
-        
-        if not network_config:
-            return PktGenerateResponse(
-                success=False,
-                error="Could not parse network description. Please be more specific."
-            )
-        
-        # Step 2: Calculate VLSM subnets
-        subnets = calculate_vlsm(
-            network_config.base_network,
-            network_config.subnets
-        )
-        
-        # Step 3: Generate and Save Packet Tracer File
-        # FIX B2: Lock per evitare race condition su scrittura file concorrente
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-        
-        with _pkt_generation_lock:
-            # Protegge save_pkt_file da accessi concorrenti
-            result = save_pkt_file(subnets, network_config.model_dump(), output_dir)
-        
+        _, subnets_input = _to_network_config(request)
+        protocol_value = "static" if request.routing_protocol == "STATIC" else request.routing_protocol
+        network_config_dict = {
+            "base_network": request.base_network,
+            "subnets": [s.model_dump() for s in subnets_input],
+            "devices": {"routers": request.routers, "switches": request.switches, "pcs": request.pcs},
+            "routing_protocol": protocol_value,
+            "XML_VERSION": "8.2.2.0400",
+        }
+        subnets = calculate_vlsm(request.base_network, subnets_input)
+
+        output_base = str(settings.output_dir)
+        output_dir = os.path.join(output_base, request_id)
+
+        with lock:
+            os.makedirs(output_dir, exist_ok=True)
+            result = save_pkt_file(subnets, network_config_dict, output_dir)
+
         if not result["success"]:
             raise Exception(result.get("error", "Unknown error"))
-        
-        pkt_path = result["pkt_path"]
-        xml_path = result["xml_path"]
-        encoding_method = result["encoding_used"]
-        file_size = result["file_size"]
-        pka2xml_avail = result["pka2xml_available"]
-        
-        # Generate download URLs
-        pkt_filename = os.path.basename(pkt_path)
-        xml_filename = os.path.basename(xml_path)
-        
+
+        pkt_filename = os.path.basename(result["pkt_path"])
+        xml_filename = os.path.basename(result["xml_path"])
+
+        background_tasks.add_task(cleanup_old_files)
+
         return PktGenerateResponse(
             success=True,
-            message=f"✅ File .pkt generato con successo! (Encoding: {encoding_method})",
-            pkt_path=pkt_path,
-            xml_path=xml_path,
-            pkt_download_url=f"/api/download/{pkt_filename}",
-            xml_download_url=f"/api/download/{xml_filename}",
+            message=f"✅ File .pkt generato con successo! (Encoding: {result['encoding_used']})",
+            pkt_path=result["pkt_path"],
+            xml_path=result["xml_path"],
+            pkt_download_url=f"/api/download/{request_id}/{pkt_filename}",
+            xml_download_url=f"/api/download/{request_id}/{xml_filename}",
             config_summary={
-                "base_network": network_config.base_network,
+                "base_network": request.base_network,
                 "subnets_count": len(subnets),
-                "routers": network_config.devices.routers,
-                "switches": network_config.devices.switches,
-                "pcs": network_config.devices.pcs,
-                "routing_protocol": network_config.routing_protocol.value
+                "routers": request.routers,
+                "switches": request.switches,
+                "pcs": request.pcs,
+                "routing_protocol": request.routing_protocol,
             },
-            subnets=[{
-                "name": s.name,
-                "network": s.network,
-                "gateway": s.gateway,
-                "usable_hosts": s.usable_hosts
-            } for s in subnets]
+            subnets=[
+                {"name": s.name, "network": s.network, "gateway": s.gateway, "usable_hosts": s.usable_hosts}
+                for s in subnets
+            ],
         )
-        
-    except ValueError as e:
-        return PktGenerateResponse(
-            success=False,
-            error=f"Validation error: {str(e)}"
-        )
-    except Exception as e:
-        return PktGenerateResponse(
-            success=False,
-            error=f"PKT generation failed: {str(e)}"
-        )
+    except ValueError as exc:
+        return PktGenerateResponse(success=False, error=f"Validation error: {exc}")
+    except Exception as exc:
+        return PktGenerateResponse(success=False, error=f"PKT generation failed: {exc}")
+    finally:
+        release_request_lock(request_id)
+
 
 @router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
-async def generate_pkt_file_manual(request: ManualNetworkRequest):
-    """
-    Generate Cisco Packet Tracer .pkt file from structured parameters (NO NLP parsing).
-    
-    This endpoint bypasses Mistral AI NLP parsing and accepts direct structured parameters.
-    Ideal for automation, testing, and when you already know exact network requirements.
-    
-    Args:
-        request: ManualNetworkRequest with base_network, subnets, devices, routing_protocol
-    
-    Returns:
-        - pkt_path: Path to download the .pkt file
-        - xml_path: Path to download the debug .xml file
-        - download_url: URL to download the .pkt file
-        - encoding_method: Method used for encryption (external_pka2xml or legacy_xor_fallback)
-    
-    Example:
-        ```json
-        {
-            "base_network": "192.168.0.0/24",
-            "subnets": [
-                {"name": "Admin", "required_hosts": 20},
-                {"name": "Guest", "required_hosts": 50}
-            ],
-            "devices": {
-                "routers": 1,
-                "switches": 2,
-                "pcs": 70
-            },
-            "routing_protocol": "static"
-        }
-        ```
-    """
+@limiter.limit("10/minute")
+async def generate_pkt_file_manual(
+    http_request: Request,
+    request: ManualNetworkRequest,
+    background_tasks: BackgroundTasks,
+):
+    del http_request
+    request_id = str(uuid.uuid4())
+    lock = get_request_lock(request_id)
+
     try:
-        # Step 1: Calculate VLSM subnets (no NLP parsing needed)
-        subnets = calculate_vlsm(
-            request.base_network,
-            request.subnets
-        )
-        
-        # Step 2: Create network config dict for PKT generation
+        subnets = calculate_vlsm(request.base_network, request.subnets)
         network_config_dict = {
             "base_network": request.base_network,
             "subnets": [s.model_dump() for s in request.subnets],
             "devices": request.devices.model_dump(),
             "routing_protocol": request.routing_protocol.value,
-            "XML_VERSION": "8.2.2.0400"  # Default PT version
+            "XML_VERSION": "8.2.2.0400",
         }
-        
-        # Step 3: Generate and Save Packet Tracer File
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-        
-        with _pkt_generation_lock:
+
+        output_base = str(settings.output_dir)
+        output_dir = os.path.join(output_base, request_id)
+
+        with lock:
+            os.makedirs(output_dir, exist_ok=True)
             result = save_pkt_file(subnets, network_config_dict, output_dir)
-        
+
         if not result["success"]:
             raise Exception(result.get("error", "Unknown error"))
-        
-        pkt_path = result["pkt_path"]
-        xml_path = result["xml_path"]
-        encoding_method = result["encoding_used"]
-        file_size = result["file_size"]
-        pka2xml_avail = result["pka2xml_available"]
-        
-        # Generate download URLs
-        pkt_filename = os.path.basename(pkt_path)
-        xml_filename = os.path.basename(xml_path)
-        
+
+        pkt_filename = os.path.basename(result["pkt_path"])
+        xml_filename = os.path.basename(result["xml_path"])
+
+        background_tasks.add_task(cleanup_old_files)
+
         return ManualPktGenerateResponse(
             success=True,
-            message=f"✅ File .pkt generato con successo! (Encoding: {encoding_method}, Size: {file_size} bytes)",
-            pkt_path=pkt_path,
-            xml_path=xml_path,
-            pkt_download_url=f"/api/download/{pkt_filename}",
-            xml_download_url=f"/api/download/{xml_filename}",
+            message=f"✅ File .pkt generato con successo! (Encoding: {result['encoding_used']}, Size: {result['file_size']} bytes)",
+            pkt_path=result["pkt_path"],
+            xml_path=result["xml_path"],
+            pkt_download_url=f"/api/download/{request_id}/{pkt_filename}",
+            xml_download_url=f"/api/download/{request_id}/{xml_filename}",
             config_summary={
                 "base_network": request.base_network,
                 "subnets_count": len(subnets),
                 "routers": request.devices.routers,
                 "switches": request.devices.switches,
                 "pcs": request.devices.pcs,
-                "routing_protocol": request.routing_protocol.value
+                "routing_protocol": request.routing_protocol.value,
             },
-            subnets=[{
-                "name": s.name,
-                "network": s.network,
-                "gateway": s.gateway,
-                "usable_hosts": s.usable_hosts
-            } for s in subnets],
-            encoding_method=encoding_method
+            subnets=[
+                {"name": s.name, "network": s.network, "gateway": s.gateway, "usable_hosts": s.usable_hosts}
+                for s in subnets
+            ],
+            encoding_method=result["encoding_used"],
         )
-        
-    except ValueError as e:
-        return ManualPktGenerateResponse(
-            success=False,
-            error=f"Validation error: {str(e)}"
-        )
-    except Exception as e:
-        return ManualPktGenerateResponse(
-            success=False,
-            error=f"PKT generation failed: {str(e)}"
-        )
+    except ValueError as exc:
+        return ManualPktGenerateResponse(success=False, error=f"Validation error: {exc}")
+    except Exception as exc:
+        return ManualPktGenerateResponse(success=False, error=f"PKT generation failed: {exc}")
+    finally:
+        release_request_lock(request_id)
 
 
-@router.get("/download/{filename}")
-async def download_file(filename: str):
-    """
-    Download generated .pkt or .xml file
-    
-    Args:
-        filename: Name of file to download (e.g., network_20240101_120000.pkt)
-    """
-    output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-    filepath = os.path.join(output_dir, filename)
-    
-    if not os.path.exists(filepath):
+@router.get("/download/{request_id}/{filename}")
+async def download_file(request_id: str, filename: str):
+    _validate_filename(request_id)
+    output_dir = settings.output_dir / request_id
+
+    filepath = _resolve_safe_path(output_dir, filename)
+
+    if not filepath.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    
-    # Determine content type
-    if filename.endswith('.pkt'):
-        media_type = "application/gzip"  # .pkt è GZIP
-    elif filename.endswith('.xml'):
+
+    if filename.endswith(".pkt"):
+        media_type = "application/gzip"
+    elif filename.endswith(".xml"):
         media_type = "application/xml"
     else:
         media_type = "application/octet-stream"
-    
-    return FileResponse(
-        filepath,
-        media_type=media_type,
-        filename=filename
-    )
+
+    return FileResponse(str(filepath), media_type=media_type, filename=filename)
+
+
+@router.get("/health")
+async def health_check_router():
+    checks = {"status": "healthy", "timestamp": datetime.now().isoformat(), "checks": {}}
+
+    output_dir = str(settings.output_dir)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        test_file = os.path.join(output_dir, ".health_check")
+        with open(test_file, "w", encoding="utf-8") as file_handle:
+            file_handle.write("ok")
+        os.remove(test_file)
+        checks["checks"]["filesystem"] = "ok"
+    except Exception as exc:
+        checks["checks"]["filesystem"] = f"error: {exc}"
+        checks["status"] = "degraded"
+
+    try:
+        get_template_path()
+        checks["checks"]["template"] = "ok"
+    except FileNotFoundError:
+        checks["checks"]["template"] = "missing"
+        checks["status"] = "unhealthy"
+
+    checks["checks"]["mistral_api"] = "ok" if settings.mistral_api_key else "no_key"
+
+    status_code = 200 if checks["status"] == "healthy" else 503
+    return JSONResponse(content=checks, status_code=status_code)
+
 
 @router.get("/templates")
 async def get_templates():
-    """
-    Get list of network configuration templates
-    """
     templates = [
         {
             "name": "Small Office",
             "description": "Rete piccolo ufficio con 2 VLAN",
-            "example": "Create network with VLAN Admin (10 hosts) and VLAN Guest (20 hosts) using static routing"
+            "example": "Create network with VLAN Admin (10 hosts) and VLAN Guest (20 hosts) using static routing",
         },
         {
-            "name": "Corporate Campus", 
+            "name": "Corporate Campus",
             "description": "Campus aziendale multi-edificio",
-            "example": "Network with 3 buildings: Building_A (100 hosts), Building_B (50 hosts), Building_C (25 hosts) using OSPF"
+            "example": "Network with 3 buildings: Building_A (100 hosts), Building_B (50 hosts), Building_C (25 hosts) using OSPF",
         },
         {
             "name": "Data Center",
             "description": "Rete data center con DMZ",
-            "example": "Data center network with DMZ (5 servers), Production (50 hosts), Management (10 hosts) using EIGRP"
+            "example": "Data center network with DMZ (5 servers), Production (50 hosts), Management (10 hosts) using EIGRP",
         },
         {
             "name": "School Network",
             "description": "Rete scolastica",
-            "example": "School network with Labs (100 hosts), Teachers (30 hosts), Admin (10 hosts), Guests (50 hosts) using RIP"
-        }
+            "example": "School network with Labs (100 hosts), Teachers (30 hosts), Admin (10 hosts), Guests (50 hosts) using RIP",
+        },
     ]
-    
-    return {
-        "success": True,
-        "templates": templates
-    }
+
+    return {"success": True, "templates": templates}
