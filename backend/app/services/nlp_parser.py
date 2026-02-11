@@ -1,146 +1,229 @@
-"""                                                                                                    
-NLP Parser Service - Uses Mistral AI to parse natural language network descriptions
-"""
+"""NLP parser service with LLM + RAG guardrails for normalized JSON extraction."""
 
-import os
 import json
 import logging
-from mistralai import Mistral
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import os
+from typing import Any
+
 import httpx
-from app.models.schemas import NetworkConfig, SubnetRequest, DeviceConfig, RoutingProtocol
-from app.utils.cache import response_cache
+from mistralai import Mistral
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from app.models.schemas import ParseIntent, ParseNetworkResponse
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a network configuration parser. Extract structured data from natural language network descriptions.
-
-Return ONLY valid JSON with this exact structure:
-{
-  "base_network": "X.X.X.X/XX",
-  "subnets": [
-    {"name": "Subnet-1", "required_hosts": 50}
-  ],
-  "devices": {"routers": 1, "switches": 2, "pcs": 10},
-  "routing_protocol": "static"
+RAG_KNOWLEDGE_BASE = {
+    "schema": {
+        "base_network": "string CIDR",
+        "routers": "integer >= 1",
+        "switches": "integer >= 0",
+        "pcs": "integer >= 1",
+        "routing_protocol": "STATIC | RIP | OSPF | EIGRP",
+        "subnets": [{"name": "string", "required_hosts": "integer >= 1"}],
+    },
+    "required_fields": ["base_network", "routers", "switches", "pcs", "routing_protocol"],
+    "limits": {
+        "routers": ">= 1",
+        "switches": ">= 0",
+        "pcs": ">= 1",
+        "subnet_required_hosts": ">= 1",
+    },
+    "allowed_values": {
+        "routing_protocol": ["STATIC", "RIP", "OSPF", "EIGRP"],
+        "routing_synonyms": {
+            "static": "STATIC",
+            "static routing": "STATIC",
+            "statico": "STATIC",
+            "rip": "RIP",
+            "ospf": "OSPF",
+            "eigrp": "EIGRP",
+        },
+    },
+    "examples": {
+        "valid": [
+            "Rete 10.0.0.0/24 con 1 router, 2 switch, 30 pc, routing statico",
+            "Network 192.168.10.0/24, routers 2, switches 4, pcs 120, OSPF",
+        ],
+        "invalid": [
+            "Scrivimi una poesia",
+            "Voglio una rete bella senza dettagli",
+        ],
+    },
 }
 
+NETWORK_KEYWORDS = {
+    "rete", "network", "router", "switch", "pc", "vlan", "subnet", "routing", "ospf", "rip", "eigrp", "cidr"
+}
+
+SYSTEM_PROMPT = """You are a strict network-request parser.
+You must act as a parser/validator only. Never generate prose.
+You MUST return exactly one valid JSON object with this schema:
+{
+  "intent": "not_network | incomplete | complete",
+  "missing": ["field_name"],
+  "json": {
+    "base_network": "...",
+    "routers": 1,
+    "switches": 1,
+    "pcs": 10,
+    "routing_protocol": "STATIC",
+    "subnets": [{"name": "LAN", "required_hosts": 10}]
+  }
+}
 Rules:
-- base_network: Use CIDR notation (e.g., "192.168.1.0/24"). Default: "192.168.0.0/16"
-- subnets: Array of objects with name and required_hosts (extract from VLAN names, building names, etc.)
-- devices: Count of each device type mentioned (routers, switches, pcs)
-- routing_protocol: One of "static", "RIP", "OSPF", "EIGRP" (default: static)
-- Extract numbers from text (e.g., "cinquanta host" → 50, "50 hosts" → 50)
-- If not specified, use sensible defaults
-- ALWAYS return valid JSON, nothing else
+- Use knowledge_base as guardrails.
+- If user request is unrelated to network configuration -> intent=not_network, missing=[], json={}
+- If network-related but required fields are missing -> intent=incomplete and missing must list exact missing required fields.
+- If complete -> intent=complete and json must contain normalized values.
+- Normalize routing synonyms (e.g. statico/static routing -> STATIC).
+- Do NOT invent missing values.
+- Do NOT calculate subnets, masks, or network math.
+- Output JSON only. No markdown, no explanations.
+"""
 
-Examples:
-Input: "Crea rete con VLAN Sales 50 host e IT 30 host, usa OSPF"
-Output: {"base_network":"192.168.0.0/16","subnets":[{"name":"Sales","required_hosts":50},{"name":"IT","required_hosts":30}],"devices":{"routers":1,"switches":2,"pcs":80},"routing_protocol":"OSPF"}
 
-Input: "Network with 3 buildings: A (100 hosts), B (50 hosts), C (25 hosts)"
-Output: {"base_network":"192.168.0.0/16","subnets":[{"name":"Building_A","required_hosts":100},{"name":"Building_B","required_hosts":50},{"name":"Building_C","required_hosts":25}],"devices":{"routers":3,"switches":3,"pcs":175},"routing_protocol":"static"}"""
+def _normalize_routing_protocol(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().upper()
+    synonyms = {
+        "STATIC": "STATIC",
+        "STATIC ROUTING": "STATIC",
+        "STATICO": "STATIC",
+        "RIP": "RIP",
+        "OSPF": "OSPF",
+        "EIGRP": "EIGRP",
+    }
+    return synonyms.get(token)
+
+
+def _merge_with_state(parsed_json: dict[str, Any], current_state: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current_state or {})
+    for key, value in (parsed_json or {}).items():
+        if value in (None, "", [], {}):
+            continue
+        merged[key] = value
+
+    if "routing_protocol" in merged:
+        normalized = _normalize_routing_protocol(merged.get("routing_protocol"))
+        if normalized:
+            merged["routing_protocol"] = normalized
+
+    return merged
+
+
+def _validate_normalized_json(data: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+    required = ["base_network", "routers", "switches", "pcs", "routing_protocol"]
+    missing: list[str] = []
+
+    normalized = dict(data)
+    for field in required:
+        if field not in normalized or normalized[field] in (None, "", []):
+            missing.append(field)
+
+    routers = normalized.get("routers")
+    if routers is not None and (not isinstance(routers, int) or routers < 1):
+        missing.append("routers")
+
+    switches = normalized.get("switches")
+    if switches is not None and (not isinstance(switches, int) or switches < 0):
+        missing.append("switches")
+
+    pcs = normalized.get("pcs")
+    if pcs is not None and (not isinstance(pcs, int) or pcs < 1):
+        missing.append("pcs")
+
+    protocol = _normalize_routing_protocol(normalized.get("routing_protocol"))
+    if protocol is None:
+        missing.append("routing_protocol")
+    else:
+        normalized["routing_protocol"] = protocol
+
+    if not isinstance(normalized.get("subnets"), list):
+        normalized["subnets"] = []
+
+    return sorted(set(missing)), normalized
+
+
+def _is_network_related(user_input: str) -> bool:
+    lowered = user_input.lower()
+    return any(keyword in lowered for keyword in NETWORK_KEYWORDS)
+
 
 @retry(
     retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException, Exception)),
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    reraise=True
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True,
 )
-async def parse_network_description(description: str) -> NetworkConfig | None:
-    """
-    Parse natural language network description using Mistral AI.
-    Includes automatic retry with exponential backoff for transient failures.
-    
-    Args:
-        description: Natural language description of the network
-        
-    Returns:
-        NetworkConfig object or None if parsing fails
-        
-    Raises:
-        ValueError: If API key is not configured or parsing fails
-    """
+async def parse_network_request(user_input: str, current_state: dict[str, Any]) -> ParseNetworkResponse:
+    """Parse user text into strict normalized JSON intent contract."""
+    if not _is_network_related(user_input):
+        return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json_payload={})
+
     api_key = os.environ.get("MISTRAL_API_KEY")
-    
     if not api_key:
-        raise ValueError("MISTRAL_API_KEY not configured. Set MISTRAL_API_KEY in .env file.")
-    
+        merged = _merge_with_state({}, current_state)
+        missing, normalized = _validate_normalized_json(merged)
+        if missing:
+            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json_payload={})
+        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json_payload=normalized)
+
     client = Mistral(api_key=api_key)
-    
+
     try:
-        logger.info(f"Parsing network description: {description[:50]}...")
-        
         response = client.chat.complete(
             model="mistral-small-latest",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Parse this network description:\n\n{description}"}
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "user_input": user_input,
+                            "current_state": current_state,
+                            "knowledge_base": RAG_KNOWLEDGE_BASE,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
             ],
-            temperature=0.1,
-            response_format={"type": "json_object"}
+            temperature=0.0,
+            response_format={"type": "json_object"},
         )
-        
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        
-        logger.info("Successfully parsed network description")
-        
-        # Build NetworkConfig from parsed data
-        subnets = [
-            SubnetRequest(name=s.get("name", f"Subnet-{i+1}"), required_hosts=s.get("required_hosts", 10))
-            for i, s in enumerate(data.get("subnets", []))
-        ]
-        
-        # Default subnet if none specified
-        if not subnets:
-            subnets = [SubnetRequest(name="LAN", required_hosts=30)]
-        
-        devices_data = data.get("devices", {})
-        devices = DeviceConfig(
-            routers=max(1, devices_data.get("routers", 1)),
-            switches=max(1, devices_data.get("switches", 1)),
-            pcs=devices_data.get("pcs", 0)
+
+        data = json.loads(response.choices[0].message.content)
+        parsed_json = data.get("json", {}) if isinstance(data, dict) else {}
+
+        merged = _merge_with_state(parsed_json, current_state)
+        missing, normalized = _validate_normalized_json(merged)
+
+        if data.get("intent") == ParseIntent.NOT_NETWORK.value:
+            return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json_payload={})
+
+        if missing:
+            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json_payload={})
+
+        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json_payload=normalized)
+
+    except json.JSONDecodeError as exc:
+        logger.error("Invalid JSON from parser model: %s", exc, exc_info=True)
+        return ParseNetworkResponse(
+            intent=ParseIntent.INCOMPLETE,
+            missing=["base_network", "routers", "switches", "pcs", "routing_protocol"],
+            json_payload={
+                "error": "NLP service returned invalid JSON",
+                "fallback_message": "Please provide complete parameters manually",
+            },
         )
-        
-        protocol_str = data.get("routing_protocol", "static").upper()
-        if protocol_str == "STATIC":
-            protocol = RoutingProtocol.STATIC
-        elif protocol_str == "RIP":
-            protocol = RoutingProtocol.RIP
-        elif protocol_str == "OSPF":
-            protocol = RoutingProtocol.OSPF
-        elif protocol_str == "EIGRP":
-            protocol = RoutingProtocol.EIGRP
-        else:
-            protocol = RoutingProtocol.STATIC
-        
-        result = NetworkConfig(
-            base_network=data.get("base_network", "192.168.0.0/16"),
-            subnets=subnets,
-            devices=devices,
-            routing_protocol=protocol
+    except Exception as exc:
+        logger.error("Parser failure: %s", exc, exc_info=True)
+        return ParseNetworkResponse(
+            intent=ParseIntent.INCOMPLETE,
+            missing=["base_network", "routers", "switches", "pcs", "routing_protocol"],
+            json_payload={
+                "error": "NLP service temporarily unavailable",
+                "fallback_message": "Please provide complete parameters manually",
+            },
         )
-        
-        # Cache result before returning
-        result_dict = result.model_dump()
-        response_cache.set(description, result_dict)
-        logger.info(f"Cached parse result (cache size: {response_cache.size()})")
-        
-        return result
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM response as JSON: {e}")
-        raise ValueError(f"AI returned invalid JSON: {e}")
-    except httpx.TimeoutException as e:
-        logger.error(f"Mistral API timeout: {e}")
-        raise ValueError("AI service timeout. Please try again.")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 429:
-            logger.error("Mistral API rate limit exceeded")
-            raise ValueError("AI service rate limit exceeded. Please wait a moment.")
-        logger.error(f"Mistral API HTTP error: {e}")
-        raise ValueError(f"AI service error: {e.response.status_code}")
-    except Exception as e:
-        logger.error(f"Unexpected error during LLM parsing: {e}", exc_info=True)
-        raise ValueError(f"Failed to parse network description: {str(e)}")

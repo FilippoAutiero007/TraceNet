@@ -28,3 +28,6 @@ python-json-logger==2.0.7
 tenacity==8.2.3
 
 # Note: ptexplorer is a custom module in backend/ptexplorer.py (not a PyPI package)
+
+# Rate limiting
+slowapi==0.1.9
