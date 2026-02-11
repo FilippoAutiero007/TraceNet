@@ -1,4 +1,4 @@
-﻿"""Generate router - parser endpoint + deterministic PKT generation endpoints."""
+"""Generate router - parser endpoint + deterministic PKT generation endpoints."""
 
 import os
 from threading import Lock
