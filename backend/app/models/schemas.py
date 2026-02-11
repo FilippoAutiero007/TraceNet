@@ -2,7 +2,7 @@
 Pydantic models for NetTrace API
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
@@ -56,6 +56,62 @@ class GenerateResponse(BaseModel):
 class PktGenerateRequest(BaseModel):
     """Request body for /api/generate-pkt endpoint"""
     description: str = Field(..., min_length=10, description="Natural language network description")
+
+
+class ParseIntent(str, Enum):
+    NOT_NETWORK = "not_network"
+    INCOMPLETE = "incomplete"
+    COMPLETE = "complete"
+
+
+class ParseNetworkRequest(BaseModel):
+    """Request body for /api/parse-network-request endpoint"""
+    user_input: str = Field(..., min_length=1, description="User natural language input")
+    current_state: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Already collected conversation fields"
+    )
+
+
+class NormalizedSubnet(BaseModel):
+    """Normalized subnet entry used by backend generation."""
+    name: str = Field(..., min_length=1)
+    required_hosts: int = Field(..., ge=1)
+
+
+class NormalizedNetworkRequest(BaseModel):
+    """Normalized payload accepted by /api/generate-pkt (no free text)."""
+    base_network: str = Field(..., description="Base network in CIDR notation")
+    routers: int = Field(..., ge=1)
+    switches: int = Field(..., ge=0)
+    pcs: int = Field(..., ge=1)
+    routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
+    subnets: List[NormalizedSubnet] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_coherence(self):
+        allowed_protocols = {"STATIC", "RIP", "OSPF", "EIGRP"}
+        protocol = self.routing_protocol.strip().upper()
+        if protocol not in allowed_protocols:
+            raise ValueError(f"routing_protocol must be one of {sorted(allowed_protocols)}")
+        self.routing_protocol = protocol
+
+        if self.subnets:
+            total_subnet_hosts = sum(subnet.required_hosts for subnet in self.subnets)
+            if total_subnet_hosts < self.pcs:
+                raise ValueError(
+                    "Total subnet required_hosts must be >= pcs for coherent host allocation"
+                )
+        return self
+
+
+class ParseNetworkResponse(BaseModel):
+    """Strict parser response contract for frontend orchestration."""
+    intent: ParseIntent
+    missing: List[str] = Field(default_factory=list)
+    json_payload: Dict[str, Any] = Field(default_factory=dict, alias="json", serialization_alias="json")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 class PktGenerateResponse(BaseModel):
     """Response from /api/generate-pkt endpoint with .pkt file info"""
