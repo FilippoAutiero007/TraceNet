@@ -52,7 +52,21 @@ export function Generator() {
     const apiBaseUrl = getApiBaseUrl();
 
     try {
-      const parseData = (await apiClient.parseNetworkRequest(description, conversationState)) as ParseResponse;
+      const parseResponse = await fetch(`${API_URL}/api/parse-network-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_input: description,
+          current_state: conversationState,
+        }),
+      });
+
+      if (!parseResponse.ok) {
+        const errorData = await parseResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.detail || 'Parser endpoint failed');
+      }
+
+      const parseData: ParseResponse = await parseResponse.json();
 
       if (parseData.intent === 'not_network') {
         throw new Error('La richiesta non sembra relativa alla generazione di una rete.');
@@ -65,7 +79,23 @@ export function Generator() {
 
       setConversationState(parseData.json);
 
-      const data = (await apiClient.generateNetwork(parseData.json)) as GenerateResponse;
+      const generationResponse = await fetch(`${API_URL}/api/generate-pkt`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(parseData.json),
+      });
+
+      if (!generationResponse.ok) {
+        if (generationResponse.status >= 500) {
+          throw new Error('Cannot connect to server. Make sure backend is running on port 8000.');
+        }
+        const errorData = await generationResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.detail || `Server error: ${generationResponse.status}`);
+      }
+
+      const data: GenerateResponse = await generationResponse.json();
 
       if (data.success && data.pkt_download_url) {
         setResult(data);

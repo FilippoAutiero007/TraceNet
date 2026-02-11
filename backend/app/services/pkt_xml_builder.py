@@ -29,9 +29,9 @@ _SAFE_LABEL = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 def _sanitize_label(value: str, fallback: str) -> str:
     candidate = (value or "").strip()
     if _SAFE_LABEL.fullmatch(candidate):
-        return escape(candidate)
+        return candidate
     logger.warning("Unsafe label detected, using fallback", extra={"label": value, "fallback": fallback})
-    return escape(fallback)
+    return fallback
 
 
 def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:

@@ -6,7 +6,7 @@ import os
 import random
 import re
 import sys
-import uuid
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -160,12 +160,6 @@ def get_pkt_generator(template_path: str) -> PKTGenerator:
     return PKTGenerator(template_path)
 
 
-@lru_cache(maxsize=1)
-def get_template_encrypted_bytes(template_path: str) -> bytes:
-    with open(template_path, 'rb') as file_handle:
-        return file_handle.read()
-
-
 def get_template_path() -> Path:
     env_template = os.environ.get("PKT_TEMPLATE_PATH")
     if env_template and Path(env_template).exists():
@@ -231,15 +225,14 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
     try:
         os.makedirs(output_dir, exist_ok=True)
 
-        file_id = uuid.uuid4().hex
-        pkt_filename = f"network_{file_id}.pkt"
-        xml_filename = f"network_{file_id}.xml"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        pkt_filename = f"network_{timestamp}.pkt"
+        xml_filename = f"network_{timestamp}.xml"
 
         pkt_path = os.path.join(output_dir, pkt_filename)
         xml_path = os.path.join(output_dir, xml_filename)
 
         template_path = str(get_template_path())
-        get_template_encrypted_bytes(template_path)
         generator = get_pkt_generator(template_path)
 
         devices_config = []
@@ -295,7 +288,8 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
 
         generator.generate(devices_config, links_config=links_config, output_path=pkt_path)
 
-        xml_content = decrypt_pkt_data(Path(pkt_path).read_bytes()).decode('utf-8')
+        with open(template_path, 'rb') as file_handle:
+            xml_content = decrypt_pkt_data(file_handle.read()).decode('utf-8')
         with open(xml_path, 'w', encoding='utf-8') as xml_handle:
             xml_handle.write(xml_content)
 

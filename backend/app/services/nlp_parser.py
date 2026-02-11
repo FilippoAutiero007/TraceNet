@@ -3,9 +3,6 @@
 import json
 import logging
 import os
-import time
-from hashlib import sha256
-from threading import Lock
 from typing import Any
 
 import httpx
@@ -15,11 +12,6 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from app.models.schemas import ParseIntent, ParseNetworkResponse
 
 logger = logging.getLogger(__name__)
-
-_PARSE_CACHE_TTL_SECONDS = 300
-_PARSE_CACHE_MAX_ENTRIES = 256
-_PARSE_CACHE: dict[str, tuple[float, ParseNetworkResponse]] = {}
-_PARSE_CACHE_LOCK = Lock()
 
 RAG_KNOWLEDGE_BASE = {
     "schema": {
@@ -59,8 +51,6 @@ RAG_KNOWLEDGE_BASE = {
         ],
     },
 }
-
-MAX_USER_INPUT_CHARS = 4000
 
 NETWORK_KEYWORDS = {
     "rete", "network", "router", "switch", "pc", "vlan", "subnet", "routing", "ospf", "rip", "eigrp", "cidr"
@@ -161,80 +151,26 @@ def _is_network_related(user_input: str) -> bool:
     return any(keyword in lowered for keyword in NETWORK_KEYWORDS)
 
 
-
-
-def _build_cache_key(user_input: str, current_state: dict[str, Any]) -> str:
-    payload = json.dumps({"user_input": user_input, "current_state": current_state}, sort_keys=True, ensure_ascii=False)
-    return sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _get_cached_response(cache_key: str) -> ParseNetworkResponse | None:
-    now = time.time()
-    with _PARSE_CACHE_LOCK:
-        record = _PARSE_CACHE.get(cache_key)
-        if not record:
-            return None
-        expires_at, cached = record
-        if now > expires_at:
-            _PARSE_CACHE.pop(cache_key, None)
-            return None
-        return cached.model_copy(deep=True)
-
-
-def _set_cached_response(cache_key: str, response: ParseNetworkResponse):
-    with _PARSE_CACHE_LOCK:
-        if len(_PARSE_CACHE) >= _PARSE_CACHE_MAX_ENTRIES:
-            oldest_key = next(iter(_PARSE_CACHE))
-            _PARSE_CACHE.pop(oldest_key, None)
-        _PARSE_CACHE[cache_key] = (time.time() + _PARSE_CACHE_TTL_SECONDS, response.model_copy(deep=True))
-
-
-def get_mistral_client(api_key: str) -> Mistral:
-    """Factory extracted for dependency injection and testing."""
-    return Mistral(api_key=api_key)
-
-
 @retry(
     retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException, Exception)),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     reraise=True,
 )
-async def parse_network_request(
-    user_input: str,
-    current_state: dict[str, Any],
-    mistral_client: Mistral | None = None,
-) -> ParseNetworkResponse:
+async def parse_network_request(user_input: str, current_state: dict[str, Any]) -> ParseNetworkResponse:
     """Parse user text into strict normalized JSON intent contract."""
-    user_input = (user_input or '').strip()
-    if len(user_input) > MAX_USER_INPUT_CHARS:
-        return ParseNetworkResponse(
-            intent=ParseIntent.INCOMPLETE,
-            missing=["user_input"],
-            json_payload={"error": f"Input too long (max {MAX_USER_INPUT_CHARS} chars)"},
-        )
-
     if not _is_network_related(user_input):
-        return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json_payload={})
-
-    cache_key = _build_cache_key(user_input, current_state)
-    cached_response = _get_cached_response(cache_key)
-    if cached_response is not None:
-        return cached_response
+        return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
 
     api_key = os.environ.get("MISTRAL_API_KEY")
     if not api_key:
         merged = _merge_with_state({}, current_state)
         missing, normalized = _validate_normalized_json(merged)
         if missing:
-            response = ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json_payload={})
-            _set_cached_response(cache_key, response)
-            return response
-        response = ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json_payload=normalized)
-        _set_cached_response(cache_key, response)
-        return response
+            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json={})
+        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json=normalized)
 
-    client = mistral_client or get_mistral_client(api_key)
+    client = Mistral(api_key=api_key)
 
     try:
         response = client.chat.complete(
@@ -264,40 +200,16 @@ async def parse_network_request(
         missing, normalized = _validate_normalized_json(merged)
 
         if data.get("intent") == ParseIntent.NOT_NETWORK.value:
-            response = ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json_payload={})
-            _set_cached_response(cache_key, response)
-            return response
+            return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
 
         if missing:
-            response = ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json_payload={})
-            _set_cached_response(cache_key, response)
-            return response
+            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json={})
 
-        response = ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json_payload=normalized)
-        _set_cached_response(cache_key, response)
-        return response
+        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json=normalized)
 
     except json.JSONDecodeError as exc:
-        logger.error("Invalid JSON from parser model: %s", exc, exc_info=True)
-        response = ParseNetworkResponse(
-            intent=ParseIntent.INCOMPLETE,
-            missing=["base_network", "routers", "switches", "pcs", "routing_protocol"],
-            json_payload={
-                "error": "NLP service returned invalid JSON",
-                "fallback_message": "Please provide complete parameters manually",
-            },
-        )
-        _set_cached_response(cache_key, response)
-        return response
+        logger.error("Invalid JSON from parser model: %s", exc)
+        raise ValueError(f"AI returned invalid JSON: {exc}")
     except Exception as exc:
         logger.error("Parser failure: %s", exc, exc_info=True)
-        response = ParseNetworkResponse(
-            intent=ParseIntent.INCOMPLETE,
-            missing=["base_network", "routers", "switches", "pcs", "routing_protocol"],
-            json_payload={
-                "error": "NLP service temporarily unavailable",
-                "fallback_message": "Please provide complete parameters manually",
-            },
-        )
-        _set_cached_response(cache_key, response)
-        return response
+        raise ValueError(f"Failed to parse network request: {exc}")
