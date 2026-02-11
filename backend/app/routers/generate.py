@@ -1,4 +1,4 @@
-"""Generate router - parser endpoint + deterministic PKT generation endpoints."""
+﻿"""Generate router - parser endpoint + deterministic PKT generation endpoints."""
 
 import os
 from threading import Lock
@@ -89,7 +89,7 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
 
         return PktGenerateResponse(
             success=True,
-            message=f"✅ File .pkt generato con successo! (Encoding: {result['encoding_used']})",
+            message=f"âœ… File .pkt generato con successo! (Encoding: {result['encoding_used']})",
             pkt_path=result["pkt_path"],
             xml_path=result["xml_path"],
             pkt_download_url=f"/api/download/{pkt_filename}",
@@ -144,7 +144,7 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
 
         return ManualPktGenerateResponse(
             success=True,
-            message=f"✅ File .pkt generato con successo! (Encoding: {result['encoding_used']}, Size: {result['file_size']} bytes)",
+            message=f"âœ… File .pkt generato con successo! (Encoding: {result['encoding_used']}, Size: {result['file_size']} bytes)",
             pkt_path=result["pkt_path"],
             xml_path=result["xml_path"],
             pkt_download_url=f"/api/download/{pkt_filename}",
@@ -176,10 +176,29 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):
+    """Download generated .pkt or .xml file with path traversal protection"""
+    import re
+    from pathlib import Path
+    
+    # Validate filename (only alphanumeric + _ - .)
+    if not re.match(r'^[\w\-\.]+$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # Prevent path traversal
+    if '..' in filename or '/' in filename or '\\' in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-    filepath = os.path.join(output_dir, filename)
-
-    if not os.path.exists(filepath):
+    filepath = Path(output_dir) / filename
+    
+    # Ensure resolved path is still inside output_dir
+    try:
+        if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if not filepath.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
     if filename.endswith(".pkt"):
@@ -189,7 +208,7 @@ async def download_file(filename: str):
     else:
         media_type = "application/octet-stream"
 
-    return FileResponse(filepath, media_type=media_type, filename=filename)
+    return FileResponse(path=str(filepath), media_type=media_type, filename=filename)
 
 
 @router.get("/templates")
