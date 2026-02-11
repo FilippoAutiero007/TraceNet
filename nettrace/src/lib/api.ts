@@ -3,7 +3,13 @@
  * Frontend flow: parse text -> if complete call generate endpoint with normalized JSON only.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_BASE_URL } from '@/config';
+
+export interface ParseNetworkResponse {
+  intent: 'not_network' | 'incomplete' | 'complete';
+  missing: string[];
+  json: Record<string, unknown>;
+}
 
 export interface ParseNetworkResponse {
   intent: 'not_network' | 'incomplete' | 'complete';

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiClient, getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
 import { DownloadResult } from '@/components/DownloadResult';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -48,7 +49,7 @@ export function Generator() {
     setError(null);
     setResult(null);
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+    const apiBaseUrl = getApiBaseUrl();
 
     try {
       const parseResponse = await fetch(`${API_URL}/api/parse-network-request`, {
@@ -104,7 +105,7 @@ export function Generator() {
     } catch (err) {
       console.error('Generation error:', err);
       if (err instanceof TypeError && err.message.includes('fetch')) {
-        setError('Cannot connect to server. Make sure the backend is running at ' + API_URL);
+        setError('Cannot connect to server. Make sure the backend is running at ' + apiBaseUrl);
       } else if (err instanceof Error) {
         setError(err.message);
       } else {

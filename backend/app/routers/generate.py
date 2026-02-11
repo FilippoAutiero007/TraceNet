@@ -173,6 +173,7 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
     except Exception as exc:
         return ManualPktGenerateResponse(success=False, error=f"PKT generation failed: {exc}")
 
+    filepath = _resolve_safe_path(output_dir, filename)
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):
