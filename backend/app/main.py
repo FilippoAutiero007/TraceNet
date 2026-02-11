@@ -5,14 +5,19 @@ Converts natural language to Cisco Packet Tracer configurations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 import os
+from app.config import settings
 from app.utils.logger import setup_logger
+from app.utils.rate_limiter import limiter
 
 load_dotenv()
 
 # Configure logging on startup
-log_level = os.getenv("LOG_LEVEL", "INFO")
+log_level = settings.log_level
 logger = setup_logger("tracenet", log_level)
 
 app = FastAPI(
@@ -21,24 +26,29 @@ app = FastAPI(
     version="1.0.0"
 )
 
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"}))
+
 @app.on_event("startup")
 async def startup_event():
     """Log application startup"""
+    runtime_checks = settings.validate_runtime()
     logger.info("TraceNet API starting up", extra={
-        "environment": os.getenv("ENVIRONMENT", "development"),
-        "log_level": log_level
+        "environment": settings.environment,
+        "log_level": log_level,
+        "runtime_checks": runtime_checks,
     })
 
 # CORS middleware for frontend
 # Allow localhost for dev + Vercel production/preview domains
-origins = os.getenv(
-    "ALLOWED_ORIGINS",
-    "http://localhost:5173,https://tracenet.vercel.app,https://tracenet-git-*.vercel.app"
-).split(",")
+origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
+origin_regex = r"https://tracenet-git-[^.]+\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
