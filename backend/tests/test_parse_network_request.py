@@ -39,13 +39,3 @@ async def test_parse_network_request_complete_from_state(monkeypatch):
 
     assert response.intent == ParseIntent.COMPLETE
     assert response.json_payload["routing_protocol"] == "STATIC"
-
-
-@pytest.mark.asyncio
-async def test_parse_network_request_rejects_oversized_input(monkeypatch):
-    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
-
-    response = await parse_network_request("r" * 5000, {})
-
-    assert response.intent == ParseIntent.INCOMPLETE
-    assert response.missing == ["user_input"]

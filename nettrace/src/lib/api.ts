@@ -11,6 +11,12 @@ export interface ParseNetworkResponse {
   json: Record<string, unknown>;
 }
 
+export interface ParseNetworkResponse {
+  intent: 'not_network' | 'incomplete' | 'complete';
+  missing: string[];
+  json: Record<string, unknown>;
+}
+
 export const apiClient = {
   async parseNetworkRequest(userInput: string, currentState: Record<string, unknown> = {}) {
     const response = await fetch(`${API_BASE_URL}/api/parse-network-request`, {
@@ -40,6 +46,10 @@ export const apiClient = {
     }
 
     return response.json();
+  },
+
+  downloadFile(filename: string): string {
+    return `${API_BASE_URL}/api/download/${filename}`;
   },
 
   async healthCheck() {
