@@ -16,6 +16,7 @@ References:
 """
 
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from typing import Dict, List, Any
 import random
 import logging
