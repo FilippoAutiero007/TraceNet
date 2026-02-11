@@ -5,9 +5,13 @@ Converts natural language to Cisco Packet Tracer configurations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 import os
 from app.utils.logger import setup_logger
+from app.utils.rate_limiter import limiter
 
 load_dotenv()
 
@@ -20,6 +24,10 @@ app = FastAPI(
     description="Convert natural language to Cisco network configurations",
     version="1.0.0"
 )
+
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"}))
 
 @app.on_event("startup")
 async def startup_event():

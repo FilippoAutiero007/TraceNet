@@ -5,6 +5,10 @@ Pydantic models for NetTrace API
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 
 class RoutingProtocol(str, Enum):
     STATIC = "static"
@@ -12,10 +16,12 @@ class RoutingProtocol(str, Enum):
     OSPF = "OSPF"
     EIGRP = "EIGRP"
 
+
 class SubnetRequest(BaseModel):
     """Request for a single subnet"""
     name: str = Field(..., description="Subnet name")
     required_hosts: int = Field(..., ge=1, description="Number of required hosts")
+
 
 class DeviceConfig(BaseModel):
     """Device configuration"""
@@ -23,12 +29,14 @@ class DeviceConfig(BaseModel):
     switches: int = Field(default=1, ge=0)
     pcs: int = Field(default=0, ge=0)
 
+
 class NetworkConfig(BaseModel):
     """Parsed network configuration from NLP"""
     base_network: str = Field(..., description="Base network in CIDR notation")
     subnets: List[SubnetRequest] = Field(default_factory=list)
     devices: DeviceConfig = Field(default_factory=DeviceConfig)
     routing_protocol: RoutingProtocol = Field(default=RoutingProtocol.STATIC)
+
 
 class SubnetResult(BaseModel):
     """Calculated subnet result"""
@@ -41,9 +49,11 @@ class SubnetResult(BaseModel):
     total_hosts: int
     usable_hosts: int
 
+
 class GenerateRequest(BaseModel):
     """Request body for /api/generate endpoint"""
     description: str = Field(..., min_length=10, description="Natural language network description")
+
 
 class GenerateResponse(BaseModel):
     """Response from /api/generate endpoint"""
@@ -53,8 +63,9 @@ class GenerateResponse(BaseModel):
     cli_script: Optional[str] = None
     error: Optional[str] = None
 
+
 class PktGenerateRequest(BaseModel):
-    """Request body for /api/generate-pkt endpoint"""
+    """Request body for legacy /api/generate-pkt endpoint"""
     description: str = Field(..., min_length=10, description="Natural language network description")
 
 
