@@ -168,10 +168,15 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             ],
             encoding_method=result["encoding_used"],
         )
-    except ValueError as exc:
-        return ManualPktGenerateResponse(success=False, error=f"Validation error: {exc}")
-    except Exception as exc:
-        return ManualPktGenerateResponse(success=False, error=f"PKT generation failed: {exc}")
+   except ValueError as exc:
+    error_msg = f"Validation error: {exc}"
+    logger.error(error_msg, exc_info=True)  # AGGIUNGERE LOGGING
+    return ManualPktGenerateResponse(success=False, error=error_msg)
+    
+except Exception as exc:
+    error_msg = f"PKT generation failed: {str(exc)}"
+    logger.error(error_msg, exc_info=True)  # AGGIUNGERE LOGGING
+    return ManualPktGenerateResponse(success=False, error=error_msg)
 
 
 @router.get("/download/{filename}")
