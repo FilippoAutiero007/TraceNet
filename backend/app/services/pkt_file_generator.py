@@ -138,8 +138,19 @@ class PKTGenerator:
             logger.warning("Device not found for link: %s", link_cfg)
             return
 
-        link.find('FROM').text = from_saveref
-        link.find('TO').text = to_saveref
+           # Verifica e creazione elementi FROM/TO se mancanti
+        from_elem = link.find('FROM')
+        to_elem = link.find('TO')
+        
+        if from_elem is None:
+            logger.warning("Link template missing FROM element, creating it")
+            from_elem = ET.SubElement(link, 'FROM')
+        if to_elem is None:
+            logger.warning("Link template missing TO element, creating it")
+            to_elem = ET.SubElement(link, 'TO')
+        
+        from_elem.text = from_saveref
+        to_elem.text = to_saveref
 
         ports = link.findall('PORT')
         if len(ports) >= 2:
