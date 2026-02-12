@@ -35,12 +35,12 @@ COPY . /app/
 # Crea directory per output files
 RUN mkdir -p /tmp/tracenet
 
-# Esponi porta API
-EXPOSE 8000
+# Esponi porta API (Render uses PORT env var, default 10000)
+EXPOSE 10000
 
-# Health check
+# Health check (uses PORT env var)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health || exit 1
+    CMD curl -f http://localhost:${PORT:-10000}/api/health || exit 1
 
-# Comando di avvio con Uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Comando di avvio con Uvicorn (uses PORT env var for Render compatibility)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
