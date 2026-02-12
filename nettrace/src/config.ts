@@ -10,7 +10,7 @@ if (!parsedEnv.success) {
   console.warn('Invalid env configuration, using defaults', parsedEnv.error.flatten().fieldErrors);
 }
 
-const defaultApiUrl = import.meta.env.DEV ? 'http://localhost:8000' : 'https://tracenet.onrender.com';
+const defaultApiUrl = import.meta.env.DEV ? 'http://localhost:8000' : 'https://tracenet-api.onrender.com';
 
 export const API_BASE_URL = parsedEnv.success && parsedEnv.data.VITE_API_URL
   ? parsedEnv.data.VITE_API_URL

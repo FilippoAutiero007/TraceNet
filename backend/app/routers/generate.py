@@ -13,6 +13,7 @@ from app.models.schemas import (
     NetworkConfig,
     ParseNetworkRequest,
     ParseNetworkResponse,
+    ParseIntent,
     NormalizedNetworkRequest,
     PktGenerateResponse,
     RoutingProtocol,
@@ -53,7 +54,7 @@ async def generate_network(request: NormalizedNetworkRequest):
             base_network=request.base_network,
             subnets=subnets_input,
             devices=DeviceConfig(routers=request.routers, switches=request.switches, pcs=request.pcs),
-            routing_protocol=RoutingProtocol(request.routing_protocol.lower() if request.routing_protocol == "STATIC" else request.routing_protocol),
+            routing_protocol=RoutingProtocol(request.routing_protocol.lower()),
         )
 
         subnets = calculate_vlsm(network_config.base_network, network_config.subnets)
@@ -93,8 +94,16 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
         subnets = calculate_vlsm(request.base_network, subnets_input)
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-        with _pkt_generation_lock:
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Lock con timeout per evitare deadlock (max 30 secondi)
+        if not _pkt_generation_lock.acquire(timeout=30):
+            raise Exception("Server busy: PKT generation lock timeout. Please try again later.")
+        
+        try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
+        finally:
+            _pkt_generation_lock.release()
 
         if not result.get("success"):
             raise Exception(result.get("error", "Unknown error during PKT file save"))
@@ -152,8 +161,16 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
         }
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-        with _pkt_generation_lock:
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Lock con timeout per evitare deadlock (max 30 secondi)
+        if not _pkt_generation_lock.acquire(timeout=30):
+            raise Exception("Server busy: PKT generation lock timeout. Please try again later.")
+        
+        try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
+        finally:
+            _pkt_generation_lock.release()
 
         if not result.get("success"):
             raise Exception(result.get("error", "Unknown error during manual PKT file save"))

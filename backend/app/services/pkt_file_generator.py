@@ -248,47 +248,52 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         num_switches = int(device_counts.get("switches", 1))
         num_pcs = int(device_counts.get("pcs", 0))
 
-        for i in range(num_routers):
-            devices_config.append({
-                "name": _safe_name("Router", i),
-                "type": "router",
-                "x": 200 + i * 150,
-                "y": 200,
-            })
+        # Generazione sicura dei device config
+        try:
+            for i in range(num_routers):
+                devices_config.append({
+                    "name": _safe_name("Router", i),
+                    "type": "router",
+                    "x": 200 + i * 150,
+                    "y": 200,
+                })
 
-        for i in range(num_switches):
-            devices_config.append({
-                "name": _safe_name("Switch", i),
-                "type": "switch",
-                "x": 200 + i * 150,
-                "y": 350,
-            })
+            for i in range(num_switches):
+                devices_config.append({
+                    "name": _safe_name("Switch", i),
+                    "type": "switch",
+                    "x": 200 + i * 150,
+                    "y": 350,
+                })
 
-        pc_idx = 0
-        for subnet in subnets:
-            subnet_pcs = min(3, num_pcs - pc_idx)
-            for i in range(subnet_pcs):
-                if pc_idx >= num_pcs:
-                    break
-                ip = subnet.usable_range[i] if i < len(subnet.usable_range) else ""
+            pc_idx = 0
+            for subnet in subnets:
+                subnet_pcs = min(3, num_pcs - pc_idx)
+                for i in range(subnet_pcs):
+                    if pc_idx >= num_pcs:
+                        break
+                    ip = subnet.usable_range[i] if i < len(subnet.usable_range) else ""
+                    devices_config.append({
+                        "name": _safe_name("PC", pc_idx),
+                        "type": "pc",
+                        "ip": ip,
+                        "subnet": subnet.mask,
+                        "x": 200 + pc_idx * 120,
+                        "y": 500,
+                    })
+                    pc_idx += 1
+
+            while pc_idx < num_pcs:
                 devices_config.append({
                     "name": _safe_name("PC", pc_idx),
                     "type": "pc",
-                    "ip": ip,
-                    "subnet": subnet.mask,
                     "x": 200 + pc_idx * 120,
                     "y": 500,
                 })
                 pc_idx += 1
-
-        while pc_idx < num_pcs:
-            devices_config.append({
-                "name": _safe_name("PC", pc_idx),
-                "type": "pc",
-                "x": 200 + pc_idx * 120,
-                "y": 500,
-            })
-            pc_idx += 1
+        except Exception as dev_exc:
+            logger.error("Error generating device configurations: %s", dev_exc)
+            raise ValueError(f"Device configuration failed: {dev_exc}")
 
         links_config = build_links_config(num_routers, num_switches, num_pcs)
         logger.info("Generating %s devices and %s links", len(devices_config), len(links_config))
