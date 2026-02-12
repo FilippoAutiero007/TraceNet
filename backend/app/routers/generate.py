@@ -3,10 +3,9 @@
 import os
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from app.utils.rate_limiter import limiter
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
 from app.models.schemas import (
     GenerateResponse,
@@ -29,15 +28,13 @@ router = APIRouter(tags=["generate"])
 
 
 @router.post("/parse-network-request", response_model=ParseNetworkResponse)
-@limiter.limit("20/minute")
-async def parse_network_endpoint(http_request: Request, request: ParseNetworkRequest):
+async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
     return await parse_network_request(request.user_input, request.current_state)
 
 
 @router.post("/generate", response_model=GenerateResponse)
-@limiter.limit("10/minute")
-async def generate_network(http_request: Request, request: NormalizedNetworkRequest):
+async def generate_network(request: NormalizedNetworkRequest):
     """Generate CLI configuration from normalized JSON only."""
     try:
         subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
@@ -64,8 +61,7 @@ async def generate_network(http_request: Request, request: NormalizedNetworkRequ
 
 
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
-@limiter.limit("10/minute")
-async def generate_pkt_file(http_request: Request, request: NormalizedNetworkRequest):
+async def generate_pkt_file(request: NormalizedNetworkRequest):
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
     try:
         subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
@@ -93,7 +89,7 @@ async def generate_pkt_file(http_request: Request, request: NormalizedNetworkReq
 
         return PktGenerateResponse(
             success=True,
-            message=f"âœ… File .pkt generato con successo! (Encoding: {result['encoding_used']})",
+            message=f"✅ File .pkt generato con successo! (Encoding: {result['encoding_used']})",
             pkt_path=result["pkt_path"],
             xml_path=result["xml_path"],
             pkt_download_url=f"/api/download/{pkt_filename}",
@@ -123,8 +119,7 @@ async def generate_pkt_file(http_request: Request, request: NormalizedNetworkReq
 
 
 @router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
-@limiter.limit("10/minute")
-async def generate_pkt_file_manual(http_request: Request, request: ManualNetworkRequest):
+async def generate_pkt_file_manual(request: ManualNetworkRequest):
     """Generate Cisco Packet Tracer .pkt file from structured parameters."""
     try:
         subnets = calculate_vlsm(request.base_network, request.subnets)
@@ -149,7 +144,7 @@ async def generate_pkt_file_manual(http_request: Request, request: ManualNetwork
 
         return ManualPktGenerateResponse(
             success=True,
-            message=f"âœ… File .pkt generato con successo! (Encoding: {result['encoding_used']}, Size: {result['file_size']} bytes)",
+            message=f"✅ File .pkt generato con successo! (Encoding: {result['encoding_used']}, Size: {result['file_size']} bytes)",
             pkt_path=result["pkt_path"],
             xml_path=result["xml_path"],
             pkt_download_url=f"/api/download/{pkt_filename}",
@@ -178,7 +173,6 @@ async def generate_pkt_file_manual(http_request: Request, request: ManualNetwork
     except Exception as exc:
         return ManualPktGenerateResponse(success=False, error=f"PKT generation failed: {exc}")
 
-    filepath = _resolve_safe_path(output_dir, filename)
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):
@@ -186,18 +180,15 @@ async def download_file(filename: str):
     import re
     from pathlib import Path
     
-    # Validate filename (only alphanumeric + _ - .)
     if not re.match(r'^[\w\-\.]+$', filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
     
-    # Prevent path traversal
     if '..' in filename or '/' in filename or '\\' in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
     filepath = Path(output_dir) / filename
     
-    # Ensure resolved path is still inside output_dir
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
             raise HTTPException(status_code=403, detail="Access denied")
