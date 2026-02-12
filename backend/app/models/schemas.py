@@ -19,21 +19,30 @@ class RoutingProtocol(str, Enum):
 
 class SubnetRequest(BaseModel):
     """Request for a single subnet"""
-    name: str = Field(..., description="Subnet name")
-    required_hosts: int = Field(..., ge=1, description="Number of required hosts")
+    name: str = Field(..., min_length=1, max_length=64, description="Subnet name")
+    required_hosts: int = Field(..., ge=1, le=4094, description="Number of required hosts")
+
+    @field_validator("name")
+    @classmethod
+    def validate_subnet_name(cls, value: str) -> str:
+        if not re.match(r"^[A-Za-z0-9_-]+$", value):
+            raise ValueError("Subnet name must contain only letters, numbers, underscore or dash")
+        return value
+
 
 
 class DeviceConfig(BaseModel):
     """Device configuration"""
-    routers: int = Field(default=1, ge=0)
-    switches: int = Field(default=1, ge=0)
-    pcs: int = Field(default=0, ge=0)
+    routers: int = Field(default=1, ge=1, le=5)
+    switches: int = Field(default=1, ge=0, le=10)
+    pcs: int = Field(default=1, ge=1, le=100)
+
 
 
 class NetworkConfig(BaseModel):
     """Parsed network configuration from NLP"""
     base_network: str = Field(..., description="Base network in CIDR notation")
-    subnets: List[SubnetRequest] = Field(default_factory=list)
+    subnets: List[SubnetRequest] = Field(default_factory=list, max_length=10)
     devices: DeviceConfig = Field(default_factory=DeviceConfig)
     routing_protocol: RoutingProtocol = Field(default=RoutingProtocol.STATIC)
 

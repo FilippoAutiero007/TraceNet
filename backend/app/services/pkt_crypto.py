@@ -29,6 +29,7 @@ Encryption Pipeline (following pka2xml algorithm):
 The pipeline ensures compatibility with Packet Tracer 8.x encryption format.
 """
 
+import gzip
 import zlib
 import struct
 from typing import Tuple
@@ -207,9 +208,22 @@ def decrypt_pkt_data(pkt_data: bytes) -> bytes:
     stage2 = obf_stage2(decrypted)
     
     # Stage 4: Decompression (Qt format)
+    if len(stage2) < 6:
+        raise ValueError("Corrupted PKT payload: too short after deobfuscation")
+
     size = struct.unpack(">I", stage2[:4])[0]
-    xml_data = zlib.decompress(stage2[4:])[:size]
-    
+    compressed = stage2[4:]
+
+    # Defensive check for compressed payload header.
+    # Accept both GZIP (1f 8b) and ZLIB streams to avoid cryptic crashes on malformed files.
+    try:
+        if compressed[:2] == bytes((0x1F, 0x8B)):
+            xml_data = gzip.decompress(compressed)[:size]
+        else:
+            xml_data = zlib.decompress(compressed)[:size]
+    except Exception as exc:
+        raise ValueError("Invalid compressed payload in PKT file") from exc
+
     return xml_data
 
 

@@ -16,11 +16,22 @@ References:
 """
 
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from typing import Dict, List, Any
 import random
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+_SAFE_LABEL = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _sanitize_label(value: str, fallback: str) -> str:
+    candidate = (value or "").strip()
+    if _SAFE_LABEL.fullmatch(candidate):
+        return candidate
+    logger.warning("Unsafe label detected, using fallback", extra={"label": value, "fallback": fallback})
+    return fallback
 
 
 def build_pkt_xml(subnets: List[Any], config: Dict[str, Any]) -> str:
@@ -112,7 +123,7 @@ def _build_empty_sections(root: ET.Element):
 def _extract_device_info(device, subnet) -> Dict:
     """Extract device information for XML building."""
     return {
-        "name": device.name,
+        "name": _sanitize_label(getattr(device, "name", ""), f"{device.device_type.capitalize()}_{random.randint(100,999)}"),
         "type": device.device_type,
         "model": _get_device_model(device.device_type),
         "interfaces": getattr(device, 'interfaces', []),

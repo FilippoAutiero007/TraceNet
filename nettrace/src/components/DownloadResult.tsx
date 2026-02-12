@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { CheckCircle, Download, FileText, Network } from 'lucide-react';
+import { API_BASE_URL } from '@/config';
 
 interface SubnetInfo {
   name: string;
@@ -31,7 +32,7 @@ interface DownloadResultProps {
 }
 
 export function DownloadResult({ data }: DownloadResultProps) {
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+  const API_URL = API_BASE_URL;
   const pktUrl = `${API_URL}${data.pkt_download_url}`;
   const xmlUrl = data.xml_download_url ? `${API_URL}${data.xml_download_url}` : null;
 
