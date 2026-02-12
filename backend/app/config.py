@@ -34,6 +34,22 @@ class Settings(BaseSettings):
         "case_sensitive": False,
         "extra": "ignore",
     }
+    
+    def validate_runtime(self) -> dict:
+        """Validate runtime configuration and return status."""
+        checks = {
+            "mistral_api_key": bool(self.mistral_api_key),
+            "output_dir_exists": self.output_dir.exists() if self.output_dir else False,
+            "environment": self.environment,
+        }
+        
+        # Create output directory if it doesn't exist
+        if self.output_dir and not self.output_dir.exists():
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            checks["output_dir_exists"] = True
+            checks["output_dir_created"] = True
+        
+        return checks
 
 
 settings = Settings()
