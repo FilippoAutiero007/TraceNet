@@ -3,9 +3,10 @@
 import os
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from app.utils.rate_limiter import limiter
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
 from app.models.schemas import (
     GenerateResponse,
@@ -28,13 +29,15 @@ router = APIRouter(tags=["generate"])
 
 
 @router.post("/parse-network-request", response_model=ParseNetworkResponse)
-async def parse_network_endpoint(request: ParseNetworkRequest):
+@limiter.limit("20/minute")
+async def parse_network_endpoint(http_request: Request, request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
     return await parse_network_request(request.user_input, request.current_state)
 
 
 @router.post("/generate", response_model=GenerateResponse)
-async def generate_network(request: NormalizedNetworkRequest):
+@limiter.limit("10/minute")
+async def generate_network(http_request: Request, request: NormalizedNetworkRequest):
     """Generate CLI configuration from normalized JSON only."""
     try:
         subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
@@ -61,7 +64,8 @@ async def generate_network(request: NormalizedNetworkRequest):
 
 
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
-async def generate_pkt_file(request: NormalizedNetworkRequest):
+@limiter.limit("10/minute")
+async def generate_pkt_file(http_request: Request, request: NormalizedNetworkRequest):
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
     try:
         subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
@@ -119,7 +123,8 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
 
 
 @router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
-async def generate_pkt_file_manual(request: ManualNetworkRequest):
+@limiter.limit("10/minute")
+async def generate_pkt_file_manual(http_request: Request, request: ManualNetworkRequest):
     """Generate Cisco Packet Tracer .pkt file from structured parameters."""
     try:
         subnets = calculate_vlsm(request.base_network, request.subnets)

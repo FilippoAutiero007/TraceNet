@@ -2,8 +2,8 @@
 Pydantic models for NetTrace API
 """
 
-from pydantic import BaseModel, Field, model_validator, ConfigDict
-from typing import List, Optional, Dict, Any
+import re
+import ipaddress
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -45,6 +45,15 @@ class NetworkConfig(BaseModel):
     subnets: List[SubnetRequest] = Field(default_factory=list, max_length=10)
     devices: DeviceConfig = Field(default_factory=DeviceConfig)
     routing_protocol: RoutingProtocol = Field(default=RoutingProtocol.STATIC)
+
+    @field_validator("base_network")
+    @classmethod
+    def validate_cidr(cls, value: str) -> str:
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError as e:
+            raise ValueError(f"Invalid CIDR notation: {e}")
+        return value
 
 
 class SubnetResult(BaseModel):
@@ -107,6 +116,15 @@ class NormalizedNetworkRequest(BaseModel):
     pcs: int = Field(..., ge=1)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     subnets: List[NormalizedSubnet] = Field(default_factory=list)
+
+    @field_validator("base_network")
+    @classmethod
+    def validate_cidr(cls, value: str) -> str:
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError as e:
+            raise ValueError(f"Invalid CIDR notation: {e}")
+        return value
 
     @model_validator(mode="after")
     def validate_coherence(self):
