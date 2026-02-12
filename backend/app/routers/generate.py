@@ -1,6 +1,7 @@
 """Generate router - parser endpoint + deterministic PKT generation endpoints."""
 
 import os
+import logging
 from threading import Lock
 
 from fastapi import APIRouter, HTTPException
@@ -24,13 +25,23 @@ from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
 
 _pkt_generation_lock = Lock()
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["generate"])
 
 
 @router.post("/parse-network-request", response_model=ParseNetworkResponse)
 async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
-    return await parse_network_request(request.user_input, request.current_state)
+    try:
+        return await parse_network_request(request.user_input, request.current_state)
+    except Exception as exc:
+        logger.error("Parse network request failed: %s", exc, exc_info=True)
+        return ParseNetworkResponse(
+            intent=ParseIntent.NOT_NETWORK, 
+            missing=[], 
+            json={}, 
+            error=f"Parser error: {str(exc)}"
+        )
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -55,9 +66,13 @@ async def generate_network(request: NormalizedNetworkRequest):
             cli_script=cli_script,
         )
     except ValueError as exc:
-        return GenerateResponse(success=False, error=f"Validation error: {exc}")
+        error_msg = f"Validation error: {exc}"
+        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
+        return GenerateResponse(success=False, error=error_msg)
     except Exception as exc:
-        return GenerateResponse(success=False, error=f"Generation failed: {exc}")
+        error_msg = f"Generation failed: {exc}"
+        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
+        return GenerateResponse(success=False, error=error_msg)
 
 
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
@@ -81,8 +96,8 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
         with _pkt_generation_lock:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
 
-        if not result["success"]:
-            raise Exception(result.get("error", "Unknown error"))
+        if not result.get("success"):
+            raise Exception(result.get("error", "Unknown error during PKT file save"))
 
         pkt_filename = os.path.basename(result["pkt_path"])
         xml_filename = os.path.basename(result["xml_path"])
@@ -113,9 +128,13 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
             ],
         )
     except ValueError as exc:
-        return PktGenerateResponse(success=False, error=f"Validation error: {exc}")
+        error_msg = f"Validation error: {exc}"
+        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
+        return PktGenerateResponse(success=False, error=error_msg)
     except Exception as exc:
-        return PktGenerateResponse(success=False, error=f"PKT generation failed: {exc}")
+        error_msg = f"PKT generation failed: {exc}"
+        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
+        return PktGenerateResponse(success=False, error=error_msg)
 
 
 @router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
@@ -136,8 +155,8 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
         with _pkt_generation_lock:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
 
-        if not result["success"]:
-            raise Exception(result.get("error", "Unknown error"))
+        if not result.get("success"):
+            raise Exception(result.get("error", "Unknown error during manual PKT file save"))
 
         pkt_filename = os.path.basename(result["pkt_path"])
         xml_filename = os.path.basename(result["xml_path"])
@@ -168,15 +187,14 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             ],
             encoding_method=result["encoding_used"],
         )
-   except ValueError as exc:
-    error_msg = f"Validation error: {exc}"
-    logger.error(error_msg, exc_info=True)  # AGGIUNGERE LOGGING
-    return ManualPktGenerateResponse(success=False, error=error_msg)
-    
-except Exception as exc:
-    error_msg = f"PKT generation failed: {str(exc)}"
-    logger.error(error_msg, exc_info=True)  # AGGIUNGERE LOGGING
-    return ManualPktGenerateResponse(success=False, error=error_msg)
+    except ValueError as exc:
+        error_msg = f"Validation error: {exc}"
+        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
+        return ManualPktGenerateResponse(success=False, error=error_msg)
+    except Exception as exc:
+        error_msg = f"PKT generation failed: {str(exc)}"
+        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
+        return ManualPktGenerateResponse(success=False, error=error_msg)
 
 
 @router.get("/download/{filename}")

@@ -165,10 +165,17 @@ def get_template_path() -> Path:
     if env_template and Path(env_template).exists():
         return Path(env_template)
 
+    # Priorità 1: Path assoluto standard in Docker
+    docker_path = Path("/app/templates/simple_ref.pkt")
+    if docker_path.exists():
+        return docker_path
+
+    # Priorità 2: Path relativo al file (struttura repo)
     candidate = Path(__file__).resolve().parent.parent.parent / "templates" / "simple_ref.pkt"
     if candidate.exists():
         return candidate
 
+    # Priorità 3: Path relativo alla working directory
     candidate = Path.cwd() / "backend" / "templates" / "simple_ref.pkt"
     if candidate.exists():
         return candidate

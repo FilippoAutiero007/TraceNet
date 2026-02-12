@@ -148,6 +148,7 @@ class ParseNetworkResponse(BaseModel):
     intent: ParseIntent
     missing: List[str] = Field(default_factory=list)
     json_payload: Dict[str, Any] = Field(default_factory=dict, alias="json", serialization_alias="json")
+    error: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

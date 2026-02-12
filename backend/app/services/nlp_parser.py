@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 from mistralai import Mistral
+from pydantic import BaseModel, Field, ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.models.schemas import ParseIntent, ParseNetworkResponse
@@ -55,6 +56,12 @@ RAG_KNOWLEDGE_BASE = {
 NETWORK_KEYWORDS = {
     "rete", "network", "router", "switch", "pc", "vlan", "subnet", "routing", "ospf", "rip", "eigrp", "cidr"
 }
+
+class MistralResponseSchema(BaseModel):
+    """Schema per validare la response di Mistral."""
+    intent: ParseIntent
+    missing: list[str] = Field(default_factory=list)
+    json_payload: dict[str, Any] = Field(default_factory=dict, alias="json")
 
 SYSTEM_PROMPT = """You are a strict network-request parser.
 You must act as a parser/validator only. Never generate prose.
@@ -193,13 +200,20 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
             response_format={"type": "json_object"},
         )
 
-        data = json.loads(response.choices[0].message.content)
-        parsed_json = data.get("json", {}) if isinstance(data, dict) else {}
+        raw_content = response.choices[0].message.content
+        try:
+            data_dict = json.loads(raw_content)
+            # Validazione formale con Pydantic
+            validated_data = MistralResponseSchema.model_validate(data_dict)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            logger.error("Invalid response format from Mistral: %s. Content: %s", exc, raw_content)
+            raise ValueError(f"AI returned invalid or malformed JSON: {exc}")
 
+        parsed_json = validated_data.json_payload
         merged = _merge_with_state(parsed_json, current_state)
         missing, normalized = _validate_normalized_json(merged)
 
-        if data.get("intent") == ParseIntent.NOT_NETWORK.value:
+        if validated_data.intent == ParseIntent.NOT_NETWORK:
             return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
 
         if missing:
@@ -207,9 +221,8 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
 
         return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json=normalized)
 
-    except json.JSONDecodeError as exc:
-        logger.error("Invalid JSON from parser model: %s", exc)
-        raise ValueError(f"AI returned invalid JSON: {exc}")
     except Exception as exc:
         logger.error("Parser failure: %s", exc, exc_info=True)
-        raise ValueError(f"Failed to parse network request: {exc}")
+        if isinstance(exc, ValueError):
+            raise exc
+        raise ValueError(f"Failed to parse network request: {str(exc)}")
