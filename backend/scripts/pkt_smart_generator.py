@@ -111,12 +111,22 @@ def generate_pkt_from_template(devices_config: list, output_path: str):
         # Update position
         coords = engine.find('COORDSETTINGS')
         if coords is not None:
+            # Determina automaticamente il numero di colonne in base ai dispositivi
+            num_devices = len(devices_config)
+            if num_devices <= 4:
+                cols = 2  # Griglia 2 colonne per pochi dispositivi
+            elif num_devices <= 9:
+                cols = 3  # Griglia 3 colonne per numero medio
+            else:
+                cols = 4  # Griglia 4 colonne per molti dispositivi
+            
             x_elem = coords.find('XCOORD')
             y_elem = coords.find('YCOORD')
             if x_elem is not None:
-                x_elem.text = str(dev_config.get('x', 200 + idx * 200))
+                x_elem.text = str(dev_config.get('x', 200 + (idx % cols) * 250))
             if y_elem is not None:
-                y_elem.text = str(dev_config.get('y', 300))
+                y_elem.text = str(dev_config.get('y', 200 + (idx // cols) * 200))
+
         
         # Update IP if provided
         if 'ip' in dev_config and dev_config['ip']:
