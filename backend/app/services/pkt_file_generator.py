@@ -73,10 +73,21 @@ class PKTGenerator:
 
             device_saverefs[dev_cfg['name']] = new_saverefid
 
-            coords = engine.find('COORDSETTINGS')
+                     coords = engine.find('COORDSETTINGS')
             if coords is not None:
-                coords.find('XCOORD').text = str(dev_cfg.get('x', 200 + idx * 200))
-                coords.find('YCOORD').text = str(dev_cfg.get('y', 300))
+                # Determina automaticamente il numero di colonne in base ai dispositivi
+                num_devices = len(devices_config)
+                if num_devices <= 4:
+                    cols = 2  # Griglia 2 colonne per pochi dispositivi
+                elif num_devices <= 9:
+                    cols = 3  # Griglia 3 colonne per numero medio
+                else:
+                    cols = 4  # Griglia 4 colonne per molti dispositivi
+                
+                coords.find('XCOORD').text = str(dev_cfg.get('x', 200 + (idx % cols) * 250))
+                coords.find('YCOORD').text = str(dev_cfg.get('y', 200 + (idx // cols) * 200))
+
+
 
             if 'ip' in dev_cfg:
                 self._update_device_ip(engine, dev_cfg)
@@ -265,16 +276,12 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 devices_config.append({
                     "name": _safe_name("Router", i),
                     "type": "router",
-                    "x": 200 + i * 150,
-                    "y": 200,
                 })
 
             for i in range(num_switches):
                 devices_config.append({
                     "name": _safe_name("Switch", i),
                     "type": "switch",
-                    "x": 200 + i * 150,
-                    "y": 350,
                 })
 
             pc_idx = 0
@@ -289,8 +296,6 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                         "type": "pc",
                         "ip": ip,
                         "subnet": subnet.mask,
-                        "x": 200 + pc_idx * 120,
-                        "y": 500,
                     })
                     pc_idx += 1
 
@@ -298,10 +303,9 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 devices_config.append({
                     "name": _safe_name("PC", pc_idx),
                     "type": "pc",
-                    "x": 200 + pc_idx * 120,
-                    "y": 500,
                 })
                 pc_idx += 1
+
         except Exception as dev_exc:
             logger.error("Error generating device configurations: %s", dev_exc)
             raise ValueError(f"Device configuration failed: {dev_exc}")
