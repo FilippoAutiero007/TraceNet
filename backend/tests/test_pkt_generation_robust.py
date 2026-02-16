@@ -2,7 +2,7 @@ import pytest
 import os
 import shutil
 from unittest.mock import patch, MagicMock
-from app.services.pkt_file_generator import save_pkt_file
+from app.services.pkt_generator import save_pkt_file
 
 # Sample data for testing
 SAMPLE_SUBNETS = [] # Mock or minimal valid subnet object needed if logic uses it
@@ -15,40 +15,30 @@ class MockSubnet:
         self.network = "192.168.1.0/24"
         self.usable_hosts = 10
         self.name = "TestSubnet"
+        self.usable_range = ["192.168.1.10", "192.168.1.11"]
 
 @pytest.fixture
 def mock_data():
     return {
         "subnets": [MockSubnet()],
-        "config": {"XML_VERSION": "8.2.2.0400"}
+        "config": {"XML_VERSION": "8.2.2.0400", "devices": {"routers": 1, "switches": 1, "pcs": 1}}
     }
 
 def test_pka2xml_availability_check():
-    """Verify pka2xml is found in path or handled correctly"""
-    path = shutil.which("pka2xml")
-    # In this dev env it might be None, but the test ensures check logic works
-    # We can assert it is None or strictly String based on what we expect in THIS env
-    # For CI/Docker workflow, this would be key.
-    pass # Replaced by logic in generator
+    """Verify pka2xml is found (legacy test, simplified)"""
+    pass
 
 def test_pkt_file_generation_result_structure(mock_data):
     """Verify save_pkt_file returns correct dict structure"""
-    output_dir = "/tmp/test_pkt_gen"
+    output_dir = "test_output_gen"
     # Ensure dir exists or clean it
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
-        
-    # We mock _run_pka2xml_container and _legacy_xor_encode to avoid actual heavy lifting/dependencies
-    with patch("app.services.pkt_file_generator._legacy_xor_encode") as mock_legacy:
-        mock_legacy.return_value = b"mock_binary_content_xor"
-        
-        result = save_pkt_file(mock_data["subnets"], mock_data["config"], output_dir)
-        
-        assert result["success"] is True
-        assert os.path.exists(result["pkt_path"])
-        assert result["file_size"] > 0
-        assert "encoding_used" in result
-        
+    result = save_pkt_file(mock_data["subnets"], mock_data["config"], output_dir)
+    
+    assert result["success"] is True, f"Generation failed: {result.get('error')}"
+    assert os.path.exists(result["pkt_path"])
+    assert result["file_size"] > 0
+    assert "encoding_used" in result
+    
     # Cleanup
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)

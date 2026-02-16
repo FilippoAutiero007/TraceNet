@@ -21,7 +21,7 @@ from app.models.schemas import (
     DeviceConfig,
 )
 from app.services.nlp_parser import parse_network_request
-from app.services.pkt_file_generator import save_pkt_file
+from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
 
