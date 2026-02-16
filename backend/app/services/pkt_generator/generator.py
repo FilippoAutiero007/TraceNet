@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Carica definizione dei template (id -> metadata, incluso template_file)
 DEVICE_TEMPLATES = load_device_templates_config()
 _BASE = Path(__file__).resolve().parent.parent.parent.parent
-TEMPLATES_BASE_DIR = _BASE / "templates" / "FinalPoint"
+TEMPLATES_BASE_DIR = _BASE / "templates"
 
 
 class PKTGenerator:
