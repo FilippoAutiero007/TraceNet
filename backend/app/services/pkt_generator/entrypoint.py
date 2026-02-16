@@ -39,12 +39,21 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
 
         devices_config: list[dict[str, Any]] = []
 
+        # Router: usa di default il modello a 2 porte (id dal JSON)
         for i in range(num_routers):
-            devices_config.append({"name": safe_name("Router", i), "type": "router"})
+            devices_config.append({
+                "name": safe_name("Router", i),
+                "type": "router-2port",
+            })
 
+        # Switch: ad esempio Cisco 2960 a 24 porte (id dal JSON)
         for i in range(num_switches):
-            devices_config.append({"name": safe_name("Switch", i), "type": "switch"})
+            devices_config.append({
+                "name": safe_name("Switch", i),
+                "type": "switch-24port",
+            })
 
+        # PC: usa l'id che hai definito nel JSON per gli end device, qui assumo "pc"
         pc_idx = 0
         for subnet in subnets:
             subnet_pcs = min(3, max(0, num_pcs - pc_idx))
@@ -62,7 +71,10 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 pc_idx += 1
 
         while pc_idx < num_pcs:
-            devices_config.append({"name": safe_name("PC", pc_idx), "type": "pc"})
+            devices_config.append({
+                "name": safe_name("PC", pc_idx),
+                "type": "pc",
+            })
             pc_idx += 1
 
         links_config = build_links_config(num_routers, num_switches, num_pcs)
