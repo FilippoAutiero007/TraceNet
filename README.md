@@ -266,32 +266,6 @@ Using: RIP
 - **React Router**: Routing client-side
 - **Lucide React**: Icone moderne
 
-## 📝 API Documentation
-
-Quando il backend è in esecuzione, visita:
-- **Swagger UI**: `http://localhost:8001/docs`
-- **ReDoc**: `http://localhost:8001/redoc`
-
-## 🔧 Configurazione
-
-### Backend Environment Variables
-
-```bash
-# backend/.env
-MISTRAL_API_KEY=your_mistral_api_key_here
-DATABASE_URL=postgresql://user:password@localhost:5432/nettrace
-ENVIRONMENT=development
-OUTPUT_DIR=/tmp/tracenet
-```
-
-### Frontend Environment Variables
-
-```bash
-# nettrace/.env
-VITE_API_URL=http://localhost:8001
-VITE_WS_URL=ws://localhost:8001
-```
-
 ## 🐛 Troubleshooting
 
 ### Backend non si avvia
@@ -322,17 +296,3 @@ echo "VITE_API_URL=http://localhost:PORTA" > nettrace/.env
 MIT License - vedi [LICENSE](LICENSE) per dettagli.
 
 
-## 🎯 PKT Generation (NEW!)
-
-TraceNet now generates **working Cisco Packet Tracer files**!
-
-### Features
-- ✅ Template-based generation (PT 8.2.2 compatible)
-- ✅ Dynamic device creation (routers, switches, PCs)
-- ✅ Automatic link generation
-- ✅ IP configuration support
-
-### Quick Test
-```bash
-cd backend
-python pkt_generator_final.py
