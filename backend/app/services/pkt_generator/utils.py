@@ -66,26 +66,18 @@ def set_text(parent: ET.Element, tag: str, value: str, *, create: bool = True) -
 
 
 def load_device_templates_config(
-    config_path: str = "backend/device_templates.json",
+    config_path: str | None = None,
 ) -> Dict[str, Any]:
     """
     Carica il JSON con le definizioni dei template dei device.
-
-    Struttura attesa (esempio):
-    {
-      "router-4port": {
-        "id": "router-4port",
-        "category": "router",
-        "displayName": "...",
-        "template_file": "Router/router_4port.pkt",
-        ...
-      },
-      ...
-    }
     """
+    if config_path is None:
+        # Default: device_catalog.json nella root del backend
+        config_path = str(Path(__file__).resolve().parent.parent.parent.parent / "device_catalog.json")
+    
     path = Path(config_path)
     if not path.exists():
-        raise FileNotFoundError(f"Device templates config not found at {config_path}")
+        raise FileNotFoundError(f"Device templates config not found at {path.absolute()}")
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 

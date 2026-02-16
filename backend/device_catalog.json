@@ -270,4 +270,52 @@
     "displayName": "Cisco 2960 Switch (24 porte)",
     "template_file": "Switch/switch_2960.pkt",
     "max_ports": 24,
-    "available_ports": 
+    "available_ports": [
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/2", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/3", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/4", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/5", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/6", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/7", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/8", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/9", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/10", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/11", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/12", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/13", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/14", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/15", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/16", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/17", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/18", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/19", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/20", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/21", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/22", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/23", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/24", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/1", "type": "ethernet", "speed": "1G"},
+      {"id": "GigabitEthernet0/2", "type": "ethernet", "speed": "1G"}
+    ],
+    "capabilities": {
+      "layer2": true,
+      "layer3": false,
+      "vlans": true,
+      "stp": true
+    }
+  },
+  "pc": {
+    "id": "pc",
+    "category": "end-device",
+    "displayName": "PC",
+    "template_file": "EndDevice/pc.pkt",
+    "max_ports": 1,
+    "available_ports": [
+      {"id": "FastEthernet0", "type": "ethernet", "speed": "100M"}
+    ],
+    "capabilities": {
+      "ip_config": true
+    }
+  }
+}

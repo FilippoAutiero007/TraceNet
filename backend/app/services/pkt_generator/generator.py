@@ -21,16 +21,24 @@ logger = logging.getLogger(__name__)
 
 # Carica definizione dei template (id -> metadata, incluso template_file)
 DEVICE_TEMPLATES = load_device_templates_config()
-TEMPLATES_BASE_DIR = Path("backend/templates/FinalPoint")
+_BASE = Path(__file__).resolve().parent.parent.parent.parent
+TEMPLATES_BASE_DIR = _BASE / "templates" / "FinalPoint"
 
 
 class PKTGenerator:
-    def __init__(self, template_path: str = "backend/templates/simple_ref.pkt") -> None:
+    def __init__(self, template_path: str | None = None) -> None:
         """
         Usa un template base solo per la struttura NETWORK/DEVICES/LINKS.
         I singoli device vengono clonati da template specifici per tipo.
         """
-        template_bytes = Path(template_path).read_bytes()
+        if template_path is None:
+            template_path = str(_BASE / "templates" / "simple_ref.pkt")
+        
+        path = Path(template_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Base template not found at {path.absolute()}")
+            
+        template_bytes = path.read_bytes()
         xml_str = decrypt_pkt_data(template_bytes).decode("utf-8", errors="strict")
         self.template_root = ET.fromstring(xml_str)
 

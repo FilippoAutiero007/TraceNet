@@ -23,9 +23,10 @@ def get_template_path() -> Path:
     if env_template and Path(env_template).exists():
         return Path(env_template)
 
-    # 2. Check relative to this file (assuming structure: backend/app/services/pkt_generator/template.py)
+    # 2. Check relative to this file
     # Move up: template.py -> pkt_generator -> services -> app -> backend
-    candidate = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "simple_ref.pkt"
+    root = Path(__file__).resolve().parent.parent.parent.parent
+    candidate = root / "templates" / "simple_ref.pkt"
     if candidate.exists():
         return candidate
 
