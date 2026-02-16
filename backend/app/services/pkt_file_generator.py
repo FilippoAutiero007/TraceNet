@@ -149,16 +149,20 @@ class PKTGenerator:
             _set_text(engine, "SAVEREFID", saveref, create=True)
             device_saverefs[name] = saveref
 
+            # Calcola coordinate griglia
+            default_x = 200 + (idx % cols) * 250
+            default_y = 200 + (idx // cols) * 200
+
+            x = int(dev_cfg.get("x", default_x))
+            y = int(dev_cfg.get("y", default_y))
+
+            # Trova o crea COORDSETTINGS
             coords = engine.find("COORDSETTINGS")
-            if coords is not None:
-                default_x = 200 + (idx % cols) * 250
-                default_y = 200 + (idx // cols) * 200
+            if coords is None:
+                    coords = ET.SubElement(engine, "COORDSETTINGS")
 
-                x = int(dev_cfg.get("x", default_x))
-                y = int(dev_cfg.get("y", default_y))
-
-                _set_text(coords, "XCOORD", str(x), create=True)
-                _set_text(coords, "YCOORD", str(y), create=True)
+            _set_text(coords, "XCOORD", str(x), create=True)
+            _set_text(coords, "YCOORD", str(y), create=True)
 
             ip = dev_cfg.get("ip")
             if ip:
