@@ -67,6 +67,9 @@ class PKTGenerator:
         devices_elem.clear()
         links_elem.clear()
 
+        # Clean up Physical Workspace (remove orphaned device references)
+        self._cleanup_physical_workspace(root)
+
         # -----------------------
         # GRID layout parameters
         # -----------------------
@@ -239,3 +242,38 @@ class PKTGenerator:
             set_text(link, tag, rand_memaddr(), create=True)
 
         links_elem.append(link)
+
+    def _cleanup_physical_workspace(self, root: ET.Element) -> None:
+        """
+        Rimuove i riferimenti fisici ai device originali del template.
+        I device nel physical workspace hanno TYPE=6.
+        """
+        pw = root.find("PHYSICALWORKSPACE")
+        if pw is None:
+            return
+
+        def remove_device_nodes(parent: ET.Element):
+            # Troviamo tutti i NODE children
+            # Attenzione: i nodi possono essere in CHILDREN o direttamente sotto PW o altri nodi
+            # Nel template analizzato: PW -> NODE (id=0) -> CHILDREN -> NODE (id=1) -> CHILDREN -> NODE (device)
+            
+            # 1. Rimuovi i nodi di tipo 6 (dispositivi) dal genitore corrente
+            to_remove = []
+            for node in parent.findall("NODE"):
+                ntype = node.find("TYPE")
+                if ntype is not None and ntype.text == "6":
+                    to_remove.append(node)
+            
+            for node in to_remove:
+                parent.remove(node)
+                logger.debug("Removed orphaned physical node: %s", node.findtext("NAME"))
+
+            # 2. Ricorsione sui CHILDREN di ogni rimasuglio (Intercity, City, Building...)
+            for node in parent.findall("NODE"):
+                children_node = node.find("CHILDREN")
+                if children_node is not None:
+                    remove_device_nodes(children_node)
+                # Anche se non sono in CHILDREN, Packet Tracer a volte mette nodi annidati direttamente? 
+                # Ma lo standard sembra essere CHILDREN.
+        
+        remove_device_nodes(pw)
