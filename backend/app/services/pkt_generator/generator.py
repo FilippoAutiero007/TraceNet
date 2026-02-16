@@ -26,7 +26,10 @@ TEMPLATES_BASE_DIR = Path("backend/templates/FinalPoint")
 
 class PKTGenerator:
     def __init__(self, template_path: str = "backend/templates/simple_ref.pkt") -> None:
-        # Template base solo per struttura NETWORK/DEVICES/LINKS
+        """
+        Usa un template base solo per la struttura NETWORK/DEVICES/LINKS.
+        I singoli device vengono clonati da template specifici per tipo.
+        """
         template_bytes = Path(template_path).read_bytes()
         xml_str = decrypt_pkt_data(template_bytes).decode("utf-8", errors="strict")
         self.template_root = ET.fromstring(xml_str)
@@ -56,7 +59,9 @@ class PKTGenerator:
         devices_elem.clear()
         links_elem.clear()
 
+        # -----------------------
         # GRID layout parameters
+        # -----------------------
         num_devices = len(devices_config)
         if num_devices <= 4:
             cols = 2
@@ -74,10 +79,13 @@ class PKTGenerator:
             name = validate_name(dev_cfg["name"])
             dev_type = str(dev_cfg.get("type", "router-1port")).strip()
 
-            # 1) recupera metadati dal JSON
+            # 1) Metadati dal JSON
             device_meta = DEVICE_TEMPLATES.get(dev_type)
             if device_meta is None:
-                logger.warning("Unknown device type %s, falling back to router-1port", dev_type)
+                logger.warning(
+                    "Unknown device type %s, falling back to router-1port",
+                    dev_type,
+                )
                 device_meta = DEVICE_TEMPLATES["router-1port"]
 
             relative_template = device_meta["template_file"]  # es. "Router/router_2port.pkt"
@@ -86,7 +94,7 @@ class PKTGenerator:
             if not template_path.exists():
                 raise FileNotFoundError(f"Template file not found: {template_path}")
 
-            # 2) carica il PKT specifico del device
+            # 2) Carica il PKT specifico del device
             template_bytes = template_path.read_bytes()
             xml_str = decrypt_pkt_data(template_bytes).decode("utf-8", errors="strict")
             template_root = ET.fromstring(xml_str)
@@ -154,7 +162,7 @@ class PKTGenerator:
                 self._create_link(links_elem, link_cfg, device_saverefs)
 
         xml_bytes = (
-            b'<?xml version="1.0" encoding="utf-8"?>\n"
+            b'<?xml version="1.0" encoding="utf-8"?>\n'
             + ET.tostring(root, encoding="utf-8", method="xml")
         )
         encrypted = encrypt_pkt_data(xml_bytes)
