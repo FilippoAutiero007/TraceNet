@@ -163,12 +163,15 @@ class PKTGenerator:
             _set_text(coords, "XCOORD", str(x), create=True)
             _set_text(coords, "YCOORD", str(y), create=True)
 
-            # Trova o crea WORKSPACE e aggiorna coordinate
-            workspace = engine.find("WORKSPACE")
-            if workspace is None:
-                workspace = ET.SubElement(engine, "WORKSPACE")
-            _set_text(workspace, "XCOORD", str(x), create=True)
-            _set_text(workspace, "YCOORD", str(y), create=True)
+            # Aggiorna coordinate nel WORKSPACE esistente (non dentro ENGINE)
+            # Il WORKSPACE vero è FUORI da ENGINE, al livello del DEVICE
+            parent_device = new_device
+            workspace = parent_device.find("WORKSPACE")
+            if workspace is not None:
+                logical = workspace.find("LOGICAL")
+                if logical is not None:
+                    _set_text(logical, "X", str(x), create=True)
+                    _set_text(logical, "Y", str(y), create=True)
 
             ip = dev_cfg.get("ip")
             if ip:
