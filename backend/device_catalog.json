@@ -1,0 +1,273 @@
+{
+  "router-1port": {
+    "id": "router-1port",
+    "category": "router",
+    "displayName": "Router 1 porta",
+    "template_file": "Router/router_1port.pkt",
+    "max_ports": 1,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": false,
+      "eigrp": false,
+      "vlans": false,
+      "vpn": false,
+      "firewall": false
+    }
+  },
+  "router-2port": {
+    "id": "router-2port",
+    "category": "router",
+    "displayName": "Router 2 porte",
+    "template_file": "Router/router_2port.pkt",
+    "max_ports": 2,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": false,
+      "eigrp": false,
+      "vlans": false,
+      "vpn": false,
+      "firewall": false
+    }
+  },
+  "router-3port": {
+    "id": "router-3port",
+    "category": "router",
+    "displayName": "Router 3 porte",
+    "template_file": "Router/router_3port.pkt",
+    "max_ports": 3,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": false,
+      "vlans": false,
+      "vpn": false,
+      "firewall": false
+    }
+  },
+  "router-4port": {
+    "id": "router-4port",
+    "category": "router",
+    "displayName": "Router 4 porte",
+    "template_file": "Router/router_4port.pkt",
+    "max_ports": 4,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": false,
+      "vpn": false,
+      "firewall": false
+    }
+  },
+  "router-5port": {
+    "id": "router-5port",
+    "category": "router",
+    "displayName": "Router 5 porte",
+    "template_file": "Router/router_5port.pkt",
+    "max_ports": 5,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/0", "type": "ethernet", "speed": "1G"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": true,
+      "vpn": false,
+      "firewall": false
+    }
+  },
+  "router-6port": {
+    "id": "router-6port",
+    "category": "router",
+    "displayName": "Router 6 porte",
+    "template_file": "Router/router_6port.pkt",
+    "max_ports": 6,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/0", "type": "ethernet", "speed": "1G"},
+      {"id": "GigabitEthernet0/1", "type": "ethernet", "speed": "1G"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": true,
+      "vpn": true,
+      "firewall": false
+    }
+  },
+  "router-7port": {
+    "id": "router-7port",
+    "category": "router",
+    "displayName": "Router 7 porte",
+    "template_file": "Router/router_7port.pkt",
+    "max_ports": 7,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/0", "type": "ethernet", "speed": "1G"},
+      {"id": "GigabitEthernet0/1", "type": "ethernet", "speed": "1G"},
+      {"id": "Serial0/0/0", "type": "serial", "speed": "T1"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": true,
+      "vpn": true,
+      "firewall": true
+    }
+  },
+  "router-8port": {
+    "id": "router-8port",
+    "category": "router",
+    "displayName": "Router 8 porte",
+    "template_file": "Router/router_8port.pkt",
+    "max_ports": 8,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/0", "type": "ethernet", "speed": "1G"},
+      {"id": "GigabitEthernet0/1", "type": "ethernet", "speed": "1G"},
+      {"id": "Serial0/0/0", "type": "serial", "speed": "T1"},
+      {"id": "Serial0/0/1", "type": "serial", "speed": "T1"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": true,
+      "vpn": true,
+      "firewall": true
+    }
+  },
+  "router-9port": {
+    "id": "router-9port",
+    "category": "router",
+    "displayName": "Router 9 porte",
+    "template_file": "Router/router_9port.pkt",
+    "max_ports": 9,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet2/0", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/0", "type": "ethernet", "speed": "1G"},
+      {"id": "GigabitEthernet0/1", "type": "ethernet", "speed": "1G"},
+      {"id": "Serial0/0/0", "type": "serial", "speed": "T1"},
+      {"id": "Serial0/0/1", "type": "serial", "speed": "T1"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": true,
+      "vpn": true,
+      "firewall": true
+    }
+  },
+  "router-10port": {
+    "id": "router-10port",
+    "category": "router",
+    "displayName": "Router 10 porte",
+    "template_file": "Router/router_10port.pkt",
+    "max_ports": 10,
+    "available_ports": [
+      {"id": "FastEthernet0/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet1/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet2/0", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet2/1", "type": "ethernet", "speed": "100M"},
+      {"id": "GigabitEthernet0/0", "type": "ethernet", "speed": "1G"},
+      {"id": "GigabitEthernet0/1", "type": "ethernet", "speed": "1G"},
+      {"id": "Serial0/0/0", "type": "serial", "speed": "T1"},
+      {"id": "Serial0/0/1", "type": "serial", "speed": "T1"}
+    ],
+    "capabilities": {
+      "layer3": true,
+      "staticRouting": true,
+      "ripv2": true,
+      "ospf": true,
+      "eigrp": true,
+      "vlans": true,
+      "vpn": true,
+      "firewall": true
+    }
+  },
+  "switch-4port": {
+    "id": "switch-4port",
+    "category": "switch",
+    "displayName": "Switch 4 porte",
+    "template_file": "Switch/pt-switch_4port.pkt",
+    "max_ports": 4,
+    "available_ports": [
+      {"id": "FastEthernet0/1", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/2", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/3", "type": "ethernet", "speed": "100M"},
+      {"id": "FastEthernet0/4", "type": "ethernet", "speed": "100M"}
+    ],
+    "capabilities": {
+      "layer2": true,
+      "layer3": false,
+      "staticRouting": false,
+      "vlans": true,
+      "stp": true
+    }
+  },
+  "switch-24port": {
+    "id": "switch-24port",
+    "category": "switch",
+    "displayName": "Cisco 2960 Switch (24 porte)",
+    "template_file": "Switch/switch_2960.pkt",
+    "max_ports": 24,
+    "available_ports": 
