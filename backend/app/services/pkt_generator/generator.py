@@ -14,16 +14,19 @@ from .utils import (
     rand_memaddr,
     ensure_child,
     set_text,
+    load_device_templates_config,
 )
 
 logger = logging.getLogger(__name__)
 
+# Carica definizione dei template (id -> metadata, incluso template_file)
+DEVICE_TEMPLATES = load_device_templates_config()
+TEMPLATES_BASE_DIR = Path("backend/templates/FinalPoint")
 
-# -----------------------
-# Generator
-# -----------------------
+
 class PKTGenerator:
-    def __init__(self, template_path: str = "simple_ref.pkt") -> None:
+    def __init__(self, template_path: str = "backend/templates/simple_ref.pkt") -> None:
+        # Template base solo per struttura NETWORK/DEVICES/LINKS
         template_bytes = Path(template_path).read_bytes()
         xml_str = decrypt_pkt_data(template_bytes).decode("utf-8", errors="strict")
         self.template_root = ET.fromstring(xml_str)
@@ -31,24 +34,6 @@ class PKTGenerator:
         template_network = self.template_root.find("NETWORK")
         if template_network is None:
             raise ValueError("Invalid template: missing NETWORK node")
-
-        template_devices_node = template_network.find("DEVICES")
-        if template_devices_node is None:
-            raise ValueError("Invalid template: missing NETWORK/DEVICES node")
-
-        template_devices = template_devices_node.findall("DEVICE")
-
-        self.device_templates: dict[str, ET.Element] = {}
-        for device in template_devices:
-            engine = device.find("ENGINE")
-            if engine is None:
-                continue
-            dev_type = (engine.findtext("TYPE") or "").strip().lower()
-            if dev_type:
-                self.device_templates[dev_type] = device
-
-        if "router" not in self.device_templates:
-            raise ValueError("Invalid template: no router device template found")
 
         links_node = template_network.find("LINKS")
         template_links = links_node.findall("LINK") if links_node is not None else []
@@ -82,21 +67,51 @@ class PKTGenerator:
 
         device_saverefs: dict[str, str] = {}
 
+        # -----------------------
         # Devices
+        # -----------------------
         for idx, dev_cfg in enumerate(devices_config):
             name = validate_name(dev_cfg["name"])
-            dev_type = str(dev_cfg.get("type", "router")).strip().lower() or "router"
+            dev_type = str(dev_cfg.get("type", "router-1port")).strip()
 
-            template = self.device_templates.get(dev_type)
-            if template is None:
-                 template = self.device_templates["router"]
-            new_device = copy.deepcopy(template)
+            # 1) recupera metadati dal JSON
+            device_meta = DEVICE_TEMPLATES.get(dev_type)
+            if device_meta is None:
+                logger.warning("Unknown device type %s, falling back to router-1port", dev_type)
+                device_meta = DEVICE_TEMPLATES["router-1port"]
+
+            relative_template = device_meta["template_file"]  # es. "Router/router_2port.pkt"
+            template_path = TEMPLATES_BASE_DIR / relative_template
+
+            if not template_path.exists():
+                raise FileNotFoundError(f"Template file not found: {template_path}")
+
+            # 2) carica il PKT specifico del device
+            template_bytes = template_path.read_bytes()
+            xml_str = decrypt_pkt_data(template_bytes).decode("utf-8", errors="strict")
+            template_root = ET.fromstring(xml_str)
+
+            template_network = template_root.find("NETWORK")
+            if template_network is None:
+                raise ValueError(f"Invalid device template {template_path}: missing NETWORK")
+
+            template_devices_node = template_network.find("DEVICES")
+            if template_devices_node is None:
+                raise ValueError(f"Invalid device template {template_path}: missing DEVICES")
+
+            template_devices = template_devices_node.findall("DEVICE")
+            if not template_devices:
+                raise ValueError(f"Invalid device template {template_path}: no DEVICE found")
+
+            template_device = template_devices[0]
+            new_device = copy.deepcopy(template_device)
 
             engine = new_device.find("ENGINE")
             if engine is None:
-                logger.warning("Skipping device %s: missing ENGINE in template", name)
+                logger.warning("Skipping device %s: missing ENGINE in template %s", name, template_path)
                 continue
 
+            # Nome e saveref
             set_text(engine, "NAME", name, create=True)
             set_text(engine, "SYSNAME", name, create=False)
 
@@ -104,27 +119,21 @@ class PKTGenerator:
             set_text(engine, "SAVEREFID", saveref, create=True)
             device_saverefs[name] = saveref
 
-            # Calcola coordinate griglia con offset alternato per evitare sovrapposizione cavi
+            # Coordinate griglia con offset alternato
             default_x = 200 + (idx % cols) * 250
             default_y = 200 + (idx // cols) * 200
-
-            # Aggiungi offset Y alternato per evitare allineamento perfetto
-            y_offset = (idx % 2) * 50  # Alterna +0 e +50 pixel
+            y_offset = (idx % 2) * 50
 
             x = int(dev_cfg.get("x", default_x))
             y = int(dev_cfg.get("y", default_y + y_offset))
 
-            # Trova o crea COORDSETTINGS
             coords = engine.find("COORDSETTINGS")
             if coords is None:
                 coords = ET.SubElement(engine, "COORDSETTINGS")
             set_text(coords, "XCOORD", str(x), create=True)
             set_text(coords, "YCOORD", str(y), create=True)
 
-            # Aggiorna coordinate nel WORKSPACE esistente (non dentro ENGINE)
-            # Il WORKSPACE vero è FUORI da ENGINE, al livello del DEVICE
-            parent_device = new_device
-            workspace = parent_device.find("WORKSPACE")
+            workspace = new_device.find("WORKSPACE")
             if workspace is not None:
                 logical = workspace.find("LOGICAL")
                 if logical is not None:
@@ -137,13 +146,15 @@ class PKTGenerator:
 
             devices_elem.append(new_device)
 
+        # -----------------------
         # Links
+        # -----------------------
         if links_config:
             for link_cfg in links_config:
                 self._create_link(links_elem, link_cfg, device_saverefs)
 
         xml_bytes = (
-            b'<?xml version="1.0" encoding="utf-8"?>\n'
+            b'<?xml version="1.0" encoding="utf-8"?>\n"
             + ET.tostring(root, encoding="utf-8", method="xml")
         )
         encrypted = encrypt_pkt_data(xml_bytes)
