@@ -29,10 +29,12 @@ def build_links_config(num_routers: int, num_switches: int, num_pcs: int) -> lis
     if num_switches > 0:
         for pc_idx in range(num_pcs):
             switch_idx = pc_idx % num_switches
+            # In Cisco 2960 (switch-24port), le porte sono FastEthernet0/1, 0/2, ...
+            # Usiamo la porta 1 per il router, quindi partiamo dalla 2 per i PC
             port_num = (pc_idx // num_switches) + 2
             links_config.append({
                 "from": safe_name("Switch", switch_idx),
-                "from_port": f"FastEthernet{port_num}/1",
+                "from_port": f"FastEthernet0/{port_num}",
                 "to": safe_name("PC", pc_idx),
                 "to_port": "FastEthernet0",
             })

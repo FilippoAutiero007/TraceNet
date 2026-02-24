@@ -134,9 +134,16 @@ class PKTGenerator:
             set_text(engine, "NAME", name, create=True)
             set_text(engine, "SYSNAME", name, create=False)
 
+            # Genera un SAVEREFID unico per ogni istanza clonata
             saveref = rand_saveref()
             set_text(engine, "SAVEREFID", saveref, create=True)
             device_saverefs[name] = saveref
+
+            # Rigenera tutti gli ID e indirizzi di memoria nel device clonato per evitare collisioni
+            # Cerchiamo tutti gli elementi che contengono numeri lunghi (ID/MemAddr)
+            for node in new_device.iter():
+                if node.text and node.text.isdigit() and len(node.text) >= 10:
+                    node.text = rand_memaddr()
 
             # Coordinate griglia con offset alternato
             default_x = 200 + (idx % cols) * 250
