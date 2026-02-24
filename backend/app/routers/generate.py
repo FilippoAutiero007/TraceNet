@@ -30,6 +30,57 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["generate"])
 
 
+def _validate_filename(filename: str) -> str:
+    """Path traversal guard for downloadable filenames."""
+    import re
+
+    # Permette solo lettere, numeri, underscore, trattino, punto
+    if not re.match(r'^[\w\-\.]+$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Blocca sequenze di path traversal
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    return filename
+
+
+@router.get("/download/{filename}")
+async def download_file(filename: str):
+    """Download generated .pkt or .xml file with path traversal protection."""
+    from pathlib import Path
+    import os
+
+    _validate_filename(filename)
+
+    output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+    filepath = Path(output_dir) / filename
+
+    # Controllo definitivo: il file deve stare dentro output_dir
+    try:
+        if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Determina il media type
+    if filename.endswith(".pkt"):
+        media_type = "application/gzip"
+    elif filename.endswith(".xml"):
+        media_type = "application/xml"
+    else:
+        media_type = "application/octet-stream"
+
+    return FileResponse(
+        path=str(filepath), 
+        media_type=media_type, 
+        filename=filename
+    )
+
+
 @router.post("/parse-network-request", response_model=ParseNetworkResponse)
 async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
@@ -217,24 +268,19 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
 @router.get("/download/{filename}")
 async def download_file(filename: str):
     """Download generated .pkt or .xml file with path traversal protection"""
-    import re
     from pathlib import Path
-    
-    if not re.match(r'^[\w\-\.]+$', filename):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    
-    if '..' in filename or '/' in filename or '\\' in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    
+
+    _validate_filename(filename)
+
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
     filepath = Path(output_dir) / filename
-    
+
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
             raise HTTPException(status_code=403, detail="Access denied")
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="File not found")
 

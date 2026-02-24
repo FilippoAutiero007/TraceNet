@@ -1,6 +1,8 @@
 """
 Link management logic for PKT generator.
-Handles creating connections between devices.
+Handles connecting devices with appropriate cables.
+
+# TODO: Future enhancement: Use device_catalog.json to determine cable types and port capability.
 """
 import copy
 import logging
@@ -47,21 +49,31 @@ def create_link(
 
     new_link = copy.deepcopy(link_template)
 
-    # Set FROM and TO references
-    utils.set_text(new_link, "FROM", from_saveref, create=True)
-    utils.set_text(new_link, "TO", to_saveref, create=True)
+    # All link-data tags must go inside <CABLE>, NOT directly on <LINK>.
+    # The template already has a CABLE child with the correct structure.
+    cable = new_link.find("CABLE")
+    if cable is None:
+        cable = ET.SubElement(new_link, "CABLE")
+        # Populate mandatory CABLE defaults if created from scratch
+        utils.set_text(cable, "LENGTH", "1", create=True)
+        utils.set_text(cable, "FUNCTIONAL", "true", create=True)
 
-    # Ensure at least 2 PORT nodes exist
-    ports = new_link.findall("PORT")
+    # Set FROM and TO references inside CABLE
+    utils.set_text(cable, "FROM", from_saveref, create=True)
+    utils.set_text(cable, "TO", to_saveref, create=True)
+
+    # Ensure at least 2 PORT nodes exist inside CABLE
+    ports = cable.findall("PORT")
     while len(ports) < 2:
-        ports.append(ET.SubElement(new_link, "PORT"))
+        ports.append(ET.SubElement(cable, "PORT"))
 
     # Set Port Names
     ports[0].text = str(link_cfg.get("from_port", "FastEthernet0/0"))
     ports[1].text = str(link_cfg.get("to_port", "FastEthernet0/1"))
 
-    # Set random memaddr fields for internal consistency
-    for tag in ("FROMDEVICEMEMADDR", "TODEVICEMEMADDR", "FROMPORTMEMADDR", "TOPORTMEMADDR"):
-        utils.set_text(new_link, tag, utils.rand_memaddr(), create=True)
+    # Set memaddr fields inside CABLE with correct underscore-separated names
+    for tag in ("FROM_DEVICE_MEM_ADDR", "TO_DEVICE_MEM_ADDR",
+                "FROM_PORT_MEM_ADDR", "TO_PORT_MEM_ADDR"):
+        utils.set_text(cable, tag, utils.rand_memaddr(), create=True)
 
     return new_link

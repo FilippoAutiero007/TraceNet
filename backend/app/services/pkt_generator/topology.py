@@ -49,7 +49,7 @@ def build_links_config(num_routers: int, num_switches: int, num_pcs: int) -> Lis
             port_num = (pc_idx // num_switches) + 2
             links_config.append({
                 "from": utils.safe_name("Switch", switch_idx),
-                "from_port": f"FastEthernet{port_num}/1",
+                "from_port": f"FastEthernet0/{port_num}",
                 "to": utils.safe_name("PC", pc_idx),
                 "to_port": "FastEthernet0",
             })

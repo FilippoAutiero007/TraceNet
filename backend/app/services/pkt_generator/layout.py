@@ -41,7 +41,8 @@ def calculate_device_coordinates(
     
     # Zig-zag pattern:
     # default_x: base grid position
-    default_x = start_x + (col * col_spacing)
+    col_effective = (cols - 1 - col) if (row % 2 == 1) else col
+    default_x = start_x + (col_effective * col_spacing)
     default_y = start_y + (row * row_spacing)
 
     # Offsets to prevent perfect alignment (cable overlap)

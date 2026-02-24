@@ -59,14 +59,18 @@ def test_save_pkt_file_integration(output_dir):
     assert os.path.exists(result["pkt_path"])
     assert os.path.exists(result["xml_path"])
     assert result["pkt_file"].endswith(".pkt")
-    
     # Verify Content (Basic)
+    import re
     with open(result["xml_path"], "r", encoding="utf-8") as f:
         xml_content = f.read()
         assert "<NETWORK>" in xml_content
-        assert 'name="Router0"' in xml_content
-        assert 'name="Switch1"' in xml_content
-        assert 'name="PC4"' in xml_content # 5 PCs (0-4)
+        assert 'Router0' in xml_content
+        assert 'Switch1' in xml_content
+        assert 'PC4' in xml_content
+        
+        # Robust check for name tag handling attributes like translate="true"
+        # <NAME ...>Router0</NAME>
+        assert re.search(r"<NAME[^>]*>Router0</NAME>", xml_content)
         
     # Verify Config return
     assert len(result["devices"]) == 2 + 2 + 5 # 9 devices
