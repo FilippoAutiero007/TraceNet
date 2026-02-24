@@ -419,7 +419,7 @@ class PKTGenerator:
                             and (n.findtext("NAME") or "").lower().startswith(base_key)
                         ]
                         base_x = float(pw_node.findtext("X", default="0"))
-                        step_x = 86.0 if base_key == "pc" else 120.0
+                        step_x = 86.0 if base_key == "pc" else 2.0
                         x_elem = pw_node.find("X")
                         if x_elem is not None:
                             x_elem.text = str(base_x + step_x * len(existing_named))
