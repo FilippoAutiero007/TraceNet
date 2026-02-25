@@ -82,10 +82,61 @@ def load_device_templates_config(
         return json.load(f)
 
 
-# Legacy aliases per compatibilità durante la migrazione
-_validate_name = validate_name
-_safe_name = safe_name
-_rand_saveref = rand_saveref
-_rand_memaddr = rand_memaddr
-_ensure_child = ensure_child
-_set_text = set_text
+def rand_realistic_serial(device_type: str) -> str:
+    """
+    Generate a dynamic, realistic serial number for Packet Tracer devices.
+    Uses stable base prefixes per device family and a random numeric suffix.
+    """
+    serial_bases = {
+        "router": "PTT0810K17M-730940400000",
+        "switch": "PT-SWITCH-NM-1FE-730940400000",
+        "pc":     "PT-PC-NM-1FE-730940400000",
+        "server": "PT-SERVER-NM-1GE-730940400000",
+    }
+    base = serial_bases.get(device_type.lower(), "PT-GENERIC-730940400000")
+    offset = secrets.randbelow(99999) + 1000 # Ensure 5 digits
+    return f"{base}-{offset:05d}"
+
+
+def rand_realistic_mac(device_type: str = "generic") -> str:
+    """
+    Generate a realistic MAC address (dotted Cisco format) for PT 8.2.2.
+    OUI prefixes are chosen to resemble real Cisco/PT hardware families:
+      - Router: 0001 / 0002
+      - Switch: 0050
+      - PC:     0060
+      - Server: 00D0
+    """
+    oui_map = {
+        "router": ["0001", "0002"],
+        "switch": ["0050"],
+        "pc":     ["0060"],
+        "server": ["00D0"],
+    }
+    oui_pool = oui_map.get(device_type.lower(), ["0060"])  # default: PC-like
+    oui_prefix = secrets.choice(oui_pool)
+    # Generate a pseudo-unique NIC portion while keeping values realistic.
+    nic = f"{secrets.randbelow(0xFFFFFE - 0x170000) + 0x170000:06X}"  # 6 hex digits
+    mac_hex = (oui_prefix + nic).upper()  # 12 hex characters
+    return f"{mac_hex[0:4]}.{mac_hex[4:8]}.{mac_hex[8:12]}"
+
+
+def mac_to_link_local(mac_addr: str) -> str:
+    """
+    Convert a MAC address (with or without separators) into an IPv6
+    link-local address using the EUI-64 expansion.
+    Returns empty string on parsing errors.
+    """
+    hex_str = "".join(ch for ch in mac_addr if ch.isalnum()).lower()
+    if len(hex_str) != 12:
+        return ""
+    try:
+        mac_bytes = bytearray.fromhex(hex_str)
+    except ValueError:
+        return ""
+    # Flip the U/L bit
+    mac_bytes[0] ^= 0x02
+    # Insert FF:FE in the middle to form EUI-64
+    eui = mac_bytes[:3] + b"\xff\xfe" + mac_bytes[3:]
+    groups = [f"{(eui[i] << 8) | eui[i+1]:04x}" for i in range(0, 8, 2)]
+    return "fe80::" + ":".join(groups)

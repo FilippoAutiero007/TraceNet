@@ -1,0 +1,82 @@
+{
+  "router-1port": {
+    "base_template": "templates/Router/router_1port.pkt",
+    "max_ports": 1,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-2port": {
+    "base_template": "templates/Router/router_2port.pkt",
+    "max_ports": 2,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-3port": {
+    "base_template": "templates/Router/router_3port.pkt",
+    "max_ports": 3,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-4port": {
+    "base_template": "templates/Router/router_4port.pkt",
+    "max_ports": 4,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-5port": {
+    "base_template": "templates/Router/router_5port.pkt",
+    "max_ports": 5,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-6port": {
+    "base_template": "templates/Router/router_6port.pkt",
+    "max_ports": 6,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-7port": {
+    "base_template": "templates/Router/router_7port.pkt",
+    "max_ports": 7,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-8port": {
+    "base_template": "templates/Router/router_8port.pkt",
+    "max_ports": 8,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-9port": {
+    "base_template": "templates/Router/router_9port.pkt",
+    "max_ports": 9,
+    "port_prefix": "FastEthernet0/"
+  },
+  "router-10port": {
+    "base_template": "templates/Router/router_10port.pkt",
+    "max_ports": 10,
+    "port_prefix": "FastEthernet0/"
+  },
+  "switch": {
+    "base_template": "templates/Switch/switch_2960.pkt",
+    "max_ports": 24,
+    "port_prefix": "FastEthernet0/"
+  },
+  "switch-4port": {
+    "base_template": "templates/Switch/pt-switch_4port.pkt",
+    "max_ports": 4,
+    "port_prefix": "FastEthernet0/"
+  },
+  "switch-24port": {
+    "base_template": "templates/Switch/switch_2960.pkt",
+    "max_ports": 24,
+    "port_prefix": "FastEthernet0/"
+  },
+  "pc": {
+    "base_template": "templates/EndPoint/pc.pkt",
+    "max_ports": 1,
+    "port_prefix": "FastEthernet0"
+  },
+  "laptop": {
+    "base_template": "templates/EndPoint/laptop.pkt",
+    "max_ports": 1,
+    "port_prefix": "FastEthernet0"
+  },
+  "server": {
+    "base_template": "templates/EndPoint/server.pkt",
+    "max_ports": 1,
+    "port_prefix": "FastEthernet0"
+  }
+}
