@@ -77,7 +77,8 @@
     width: 100%;
     min-height: 100vh;
     background-color: #020617; /* slate-950 */
-    overflow-x: hidden; /* Prevent horizontal scroll */
+    overflow-x: hidden;
+    scroll-behavior: smooth;
   }
   
   body {
