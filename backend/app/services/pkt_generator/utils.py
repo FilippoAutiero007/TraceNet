@@ -33,7 +33,7 @@ def rand_saveref() -> str:
     Genera un ID pseudo-random per il campo SAVEREFID.
     """
     n = 10**18 + secrets.randbelow(9 * 10**18)
-    return f"save-ref-id{n}"
+    return f"save-ref-id:{n}"
 
 
 def rand_memaddr() -> str:

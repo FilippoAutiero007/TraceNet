@@ -4,7 +4,7 @@ from app.services.pkt_crypto import decrypt_pkt_data
 BASE_DIR = Path(__file__).parent
 
 FILES = [
-    BASE_DIR / "manual_1r2s3p.pkt",
+    BASE_DIR / "manual_1r2s4p.pkt",
 ]
 
 

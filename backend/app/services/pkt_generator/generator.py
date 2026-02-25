@@ -4,10 +4,12 @@ import copy
 import logging
 from pathlib import Path
 from typing import Any, Optional
+import uuid
 
 import xml.etree.ElementTree as ET
 
 from app.services.pkt_crypto import decrypt_pkt_data, encrypt_pkt_data
+from . import utils
 from .utils import (
     validate_name,
     rand_saveref,
@@ -50,6 +52,11 @@ class PKTGenerator:
         template_links = links_node.findall("LINK") if links_node is not None else []
         self.link_template: Optional[ET.Element] = template_links[0] if template_links else None
 
+        # Cache di riferimento per il Physical Workspace (path base + nodi prototipo)
+        self._base_physical_paths = self._extract_base_physical_paths()
+        self._base_pw_nodes = self._extract_base_pw_nodes()
+        self._pc_parent_node = self._extract_pc_parent_node()
+
     def generate(
         self,
         devices_config: list[dict[str, Any]],
@@ -82,6 +89,7 @@ class PKTGenerator:
             cols = 4
 
         device_saverefs: dict[str, str] = {}
+        used_macs: set[str] = set()
 
         # -----------------------
         # Devices
@@ -134,9 +142,13 @@ class PKTGenerator:
             set_text(engine, "NAME", name, create=True)
             set_text(engine, "SYSNAME", name, create=False)
 
-            # Genera un SAVEREFID unico per ogni istanza clonata
+            # Genera un SAVE_REF_ID unico per ogni istanza clonata (match con template PT)
             saveref = rand_saveref()
-            set_text(engine, "SAVEREFID", saveref, create=True)
+            # Aggiorna l'eventuale SAVE_REF_ID esistente; rimuove SAVEREFID legacy se presente
+            set_text(engine, "SAVE_REF_ID", saveref, create=True)
+            legacy = engine.find("SAVEREFID")
+            if legacy is not None:
+                engine.remove(legacy)
             device_saverefs[name] = saveref
 
             # Rigenera tutti gli ID e indirizzi di memoria nel device clonato per evitare collisioni
@@ -144,6 +156,48 @@ class PKTGenerator:
             for node in new_device.iter():
                 if node.text and node.text.isdigit() and len(node.text) >= 10:
                     node.text = rand_memaddr()
+
+            # MAC univoci e coerenti su TUTTI i nodi che hanno MACADDRESS
+            def next_unique_mac() -> str:
+                for _ in range(2000):
+                    mac = utils.rand_realistic_mac(dev_type)
+                    if mac not in used_macs:
+                        used_macs.add(mac)
+                        return mac
+                raise RuntimeError("Unable to generate unique MAC")
+
+            # Mappa parent -> children per gestire BIA/IPv6 nello stesso container
+            parent_map: dict[ET.Element, ET.Element] = {}
+            def build_parent_map(node: ET.Element):
+                for child in list(node):
+                    parent_map[child] = node
+                    build_parent_map(child)
+            build_parent_map(new_device)
+
+            def assign_mac(mac_elem: ET.Element) -> None:
+                mac = next_unique_mac()
+                mac_elem.text = mac
+                parent = parent_map.get(mac_elem)
+                if parent is None:
+                    return
+                bia = parent.find("BIA")
+                if bia is not None:
+                    bia.text = mac
+                link_local = utils.mac_to_link_local(mac)
+                for tag in ("IPV6_LINK_LOCAL", "IPV6_DEFAULT_LINK_LOCAL"):
+                    ll = parent.find(tag)
+                    if ll is not None:
+                        ll.text = link_local.upper() if link_local else ""
+
+            for mac_elem in new_device.iter("MACADDRESS"):
+                assign_mac(mac_elem)
+
+            # BIA senza MACADDRESS nel parent: assegna mac unico
+            for bia in new_device.iter("BIA"):
+                parent = parent_map.get(bia)
+                if parent is not None and parent.find("MACADDRESS") is not None:
+                    continue
+                bia.text = next_unique_mac()
 
             # Coordinate griglia con offset alternato
             default_x = 200 + (idx % cols) * 250
@@ -171,6 +225,9 @@ class PKTGenerator:
                 self._update_device_ip(engine, dev_cfg)
 
             devices_elem.append(new_device)
+
+        # Aggiorna il PHYSICALWORKSPACE con i nuovi device/cloni
+        self._sync_physical_workspace(root, devices_elem)
 
         # -----------------------
         # Links
@@ -232,21 +289,30 @@ class PKTGenerator:
 
         link = copy.deepcopy(self.link_template)
 
-        # Ensure FROM/TO exist
-        set_text(link, "FROM", from_saveref, create=True)
-        set_text(link, "TO", to_saveref, create=True)
+        # Tutti i campi devono stare dentro <CABLE>, non direttamente sotto <LINK>
+        cable = link.find("CABLE")
+        if cable is None:
+            cable = ET.SubElement(link, "CABLE")
+            set_text(cable, "LENGTH", "1", create=True)
+            set_text(cable, "FUNCTIONAL", "true", create=True)
 
-        # Ensure at least 2 PORT nodes
-        ports = link.findall("PORT")
+        set_text(cable, "FROM", from_saveref, create=True)
+        set_text(cable, "TO", to_saveref, create=True)
+
+        ports = cable.findall("PORT")
         while len(ports) < 2:
-            ports.append(ET.SubElement(link, "PORT"))
+            ports.append(ET.SubElement(cable, "PORT"))
 
         ports[0].text = str(link_cfg.get("from_port", "FastEthernet0/0"))
         ports[1].text = str(link_cfg.get("to_port", "FastEthernet0/1"))
 
-        # Set memaddr fields (create if missing)
-        for tag in ("FROMDEVICEMEMADDR", "TODEVICEMEMADDR", "FROMPORTMEMADDR", "TOPORTMEMADDR"):
-            set_text(link, tag, rand_memaddr(), create=True)
+        for tag in (
+            "FROM_DEVICE_MEM_ADDR",
+            "TO_DEVICE_MEM_ADDR",
+            "FROM_PORT_MEM_ADDR",
+            "TO_PORT_MEM_ADDR",
+        ):
+            set_text(cable, tag, rand_memaddr(), create=True)
 
         links_elem.append(link)
 
@@ -284,3 +350,213 @@ class PKTGenerator:
                 # Ma lo standard sembra essere CHILDREN.
         
         remove_device_nodes(pw)
+
+    # ------------------------------------------------------------------
+    # Physical workspace helpers (portati dal nuovo core generator)
+    # ------------------------------------------------------------------
+    def _extract_base_physical_paths(self) -> dict[str, list[str]]:
+        """
+        Estrae i path PHYSICAL dai device del template di base e li usa come
+        percorso canonico per i nuovi device.
+        """
+        paths: dict[str, list[str]] = {}
+        devices_node = self.template_root.find("NETWORK/DEVICES")
+        if devices_node is None:
+            return paths
+
+        for dev in devices_node:
+            type_elem = dev.find("ENGINE/TYPE")
+            phys_elem = dev.find("WORKSPACE/PHYSICAL")
+            if phys_elem is None or phys_elem.text is None:
+                continue
+
+            raw_type = (type_elem.text if type_elem is not None else "").lower()
+            key = (
+                "pc"
+                if "pc" in raw_type or "server" in raw_type else
+                "switch"
+                if "switch" in raw_type else
+                "router"
+                if "router" in raw_type else
+                None
+            )
+            if key is None:
+                continue
+
+            path_parts = [p.strip("{} ") for p in phys_elem.text.split(",") if p.strip()]
+            paths[key] = path_parts
+
+        return paths
+
+    def _extract_base_pw_nodes(self) -> dict[str, ET.Element]:
+        """
+        Recupera i nodi prototipo (router/switch/pc) dal PHYSICALWORKSPACE del template.
+        """
+        nodes: dict[str, ET.Element] = {}
+        pw = self.template_root.find("PHYSICALWORKSPACE")
+        if pw is None:
+            return nodes
+
+        for node in pw.iter("NODE"):
+            name_elem = node.find("NAME")
+            if name_elem is None or name_elem.text is None:
+                continue
+            raw = name_elem.text.lower()
+            key = (
+                "router"
+                if "router0" in raw else
+                "switch"
+                if "switch0" in raw else
+                "pc"
+                if "pc0" in raw else
+                None
+            )
+            if key and key not in nodes:
+                nodes[key] = copy.deepcopy(node)
+
+        return nodes
+
+    def _extract_pc_parent_node(self) -> Optional[ET.Element]:
+        """
+        Trova il NODE padre che contiene PC0 nel PHYSICALWORKSPACE di base.
+        """
+        pw = self.template_root.find("PHYSICALWORKSPACE")
+        if pw is None:
+            return None
+
+        def find_parent_of_pc0(parent: ET.Element) -> Optional[ET.Element]:
+            for child in list(parent):
+                if child.tag == "NODE":
+                    name = child.findtext("NAME")
+                    if name and name.strip() == "PC0":
+                        return parent
+                found = find_parent_of_pc0(child)
+                if found is not None:
+                    return found
+            return None
+
+        return find_parent_of_pc0(pw)
+
+    def _sync_physical_workspace(
+        self,
+        root: ET.Element,
+        devices_elem: ET.Element,
+    ) -> None:
+        """
+        Allinea ogni device (WORKSPACE/PHYSICAL) con il PHYSICALWORKSPACE globale.
+        """
+        if not self._base_physical_paths:
+            return
+
+        pw = root.find("PHYSICALWORKSPACE")
+        if pw is None:
+            return
+
+        # Nodo Rack (per router/switch e fallback)
+        rack_node: Optional[ET.Element] = None
+        for node in pw.iter("NODE"):
+            name = (node.findtext("NAME") or "").strip()
+            if name == "Rack":
+                rack_node = node
+                break
+
+        # Parent dei PC nel PHYSICALWORKSPACE corrente (non quello della base)
+        def find_pc_parent(node: ET.Element) -> Optional[ET.Element]:
+            for child in list(node):
+                if child.tag == "NODE":
+                    name = child.findtext("NAME")
+                    if name and name.strip() == "PC0":
+                        return node
+                found = find_pc_parent(child)
+                if found is not None:
+                    return found
+            return None
+
+        pc_parent_node = find_pc_parent(pw) or self._pc_parent_node
+
+        # Index: NAME -> NODE esistente
+        pw_nodes: dict[str, ET.Element] = {}
+        uuid_nodes: dict[str, ET.Element] = {}
+        for node in pw.iter("NODE"):
+            name = (node.findtext("NAME") or "").strip()
+            if name:
+                pw_nodes[name] = node
+            uuid_text = node.findtext("UUID_STR")
+            if uuid_text:
+                uuid_nodes[uuid_text.strip("{}")] = node
+
+        for dev in devices_elem:
+            name_elem = dev.find("ENGINE/NAME")
+            type_elem = dev.find("ENGINE/TYPE")
+            phys_elem = dev.find("WORKSPACE/PHYSICAL")
+            if name_elem is None or type_elem is None or phys_elem is None:
+                continue
+
+            dname = name_elem.text or ""
+            dtype = (type_elem.text or "").lower()
+            if not dname:
+                continue
+
+            # pc/server -> "pc", switch -> "switch", router -> "router"
+            if "pc" in dtype or "server" in dtype:
+                base_key = "pc"
+            elif "switch" in dtype:
+                base_key = "switch"
+            elif "router" in dtype:
+                base_key = "router"
+            else:
+                continue
+
+            base_path = self._base_physical_paths.get(base_key, [])
+            if not base_path:
+                continue
+
+            parent_node = None
+            if len(base_path) >= 2:
+                parent_node = uuid_nodes.get(base_path[-2])
+            if parent_node is None:
+                # fallback: usa Rack come contenitore predefinito
+                parent_node = rack_node
+
+            # GUID nuovo e path fisico aggiornato nel device
+            new_guid = str(uuid.uuid4())
+            new_path = base_path[:-1] + [new_guid]
+            phys_elem.text = ",".join(f"{{{p}}}" for p in new_path)
+
+            # Nodo fisico corrispondente (crea se manca)
+            pw_node = pw_nodes.get(dname)
+            if pw_node is None:
+                proto = self._base_pw_nodes.get(base_key)
+                if proto is not None:
+                    pw_node = copy.deepcopy(proto)
+                    name_field = pw_node.find("NAME")
+                    if name_field is not None:
+                        name_field.text = dname
+
+                    if parent_node is not None:
+                        if parent_node.tag == "CHILDREN":
+                            siblings = parent_node
+                        else:
+                            siblings = parent_node.find("CHILDREN")
+                            if siblings is None:
+                                siblings = ET.SubElement(parent_node, "CHILDREN")
+
+                        existing_named = [
+                            n for n in siblings.findall("NODE")
+                            if (n.findtext("NAME") or "").strip()
+                            and (n.findtext("NAME") or "").lower().startswith(base_key)
+                        ]
+                        base_x = float(pw_node.findtext("X", default="0"))
+                        step_x = 86.0 if base_key == "pc" else 120.0
+                        x_elem = pw_node.find("X")
+                        if x_elem is not None:
+                            x_elem.text = str(base_x + step_x * len(existing_named))
+
+                        siblings.append(pw_node)
+                        pw_nodes[dname] = pw_node
+
+            if pw_node is not None:
+                uuid_elem = pw_node.find("UUID_STR")
+                if uuid_elem is None:
+                    uuid_elem = ET.SubElement(pw_node, "UUID_STR")
+                uuid_elem.text = f"{{{new_guid}}}"
