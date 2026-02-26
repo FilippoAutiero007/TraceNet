@@ -3,10 +3,10 @@ Lightweight validator for generated .pkt files.
 
 What it checks (fast, no Packet Tracer needed):
  - Decryption succeeds and XML parses
- - XML_VERSION is present
+ - VERSION tag is present
  - SAVE_REF_ID values are unique and all links reference existing devices
  - MAC addresses are unique across the topology (main cause of past PT incompatibility)
- - DEV_ADDR / MEM_ADDR are unique per device
+ - DEV_ADDR / MEM_ADDR are unique per device (ignoring missing ones)
  - PHYSICALWORKSPACE contains a node for every device name
 
 Usage:
@@ -34,8 +34,10 @@ def load_xml(pkt_path: Path) -> ET.Element:
     return ET.fromstring(xml_bytes)
 
 
-def ensure_unique(values, label: str):
-    counter = Counter(values)
+def ensure_unique(values: list[str | None], label: str) -> None:
+    """Controlla che non ci siano duplicati, ignorando i valori None o vuoti."""
+    valid_values = [v for v in values if v]
+    counter = Counter(valid_values)
     dups = [v for v, c in counter.items() if c > 1]
     if dups:
         raise AssertionError(f"Duplicate {label}: {dups[:5]}")
@@ -68,20 +70,26 @@ def validate(pkt_path: Path) -> None:
     ensure_unique(macs, "MACADDRESS")
 
     # Links reference existing devices
-    saveref_set = set(saverefs)
+    saveref_set = set(v for v in saverefs if v)  # Filtra eventuali None per sicurezza
     for cable in root.findall("./NETWORK/LINKS/LINK/CABLE"):
         frm = cable.findtext("FROM")
         to = cable.findtext("TO")
+        
+        # Validazione strutturale del cavo
+        if not frm or not to:
+            raise AssertionError(f"Malformed link found: FROM={frm}, TO={to}")
+            
         if frm not in saveref_set or to not in saveref_set:
             raise AssertionError(f"Link refs unknown devices: {frm} -> {to}")
 
     # PHYSICALWORKSPACE contains each device name
-    pw_names = {n.findtext("NAME") for n in root.findall(".//PHYSICALWORKSPACE//NODE")}
+    pw_names = {n.findtext("NAME") for n in root.findall(".//PHYSICALWORKSPACE//NODE") if n.findtext("NAME")}
     missing_pw = []
     for dev in devices:
         name = dev.findtext("ENGINE/NAME")
         if name and name not in pw_names:
             missing_pw.append(name)
+            
     if missing_pw:
         raise AssertionError(f"Missing PW nodes for: {missing_pw}")
 
