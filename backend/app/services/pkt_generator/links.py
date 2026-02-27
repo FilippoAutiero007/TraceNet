@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def create_link(
-    link_template: ET.Element, 
-    link_cfg: Dict[str, Any], 
+    link_template: ET.Element,
+    link_cfg: Dict[str, Any],
     device_saverefs: Dict[str, str]
 ) -> Optional[ET.Element]:
     """
@@ -25,7 +25,7 @@ def create_link(
     Args:
         link_template: Template XML element for a link.
         link_cfg: Configuration dict (from, to, ports).
-        device_saverefs: Map of device names to their SAVEREFID.
+        device_saverefs: Map of device names to their save-ref-id (SAVE_REF_ID/SAVEREFID).
         
     Returns:
         Optional[ET.Element]: The new link XML element, or None if invalid.

@@ -65,6 +65,25 @@ def set_text(parent: ET.Element, tag: str, value: str, *, create: bool = True) -
     elem.text = value
 
 
+def set_coords(engine: ET.Element, x: int, y: int) -> None:
+    """
+    Normalize coordinates to the Packet Tracer expected tags (COORD_SETTINGS/X_COORD/Y_COORD).
+    Removes any legacy COORDSETTINGS to avoid duplicate coordinate blocks.
+    """
+    # Prefer underscore variant
+    coord = engine.find("COORD_SETTINGS")
+    if coord is None:
+        coord = ET.SubElement(engine, "COORD_SETTINGS")
+    set_text(coord, "X_COORD", str(x), create=True)
+    set_text(coord, "Y_COORD", str(y), create=True)
+    set_text(coord, "Z_COORD", "0", create=True)
+
+    # Remove legacy camel/uppercase variant if present
+    legacy = engine.find("COORDSETTINGS")
+    if legacy is not None:
+        engine.remove(legacy)
+
+
 def load_device_templates_config(
     config_path: str | None = None,
 ) -> Dict[str, Any]:
@@ -140,3 +159,15 @@ def mac_to_link_local(mac_addr: str) -> str:
     eui = mac_bytes[:3] + b"\xff\xfe" + mac_bytes[3:]
     groups = [f"{(eui[i] << 8) | eui[i+1]:04x}" for i in range(0, 8, 2)]
     return "fe80::" + ":".join(groups)
+
+
+def remove_all_tags(root: ET.Element, tag: str) -> None:
+    """
+    Remove every occurrence of a tag in the XML tree.
+    Useful for stripping legacy fields that may upset Packet Tracer.
+    """
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    for node in list(root.iter(tag)):
+        parent = parent_map.get(node)
+        if parent is not None:
+            parent.remove(node)

@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 
 from app.services.pkt_crypto import decrypt_pkt_data, encrypt_pkt_data
 from . import utils
+from .physical_workspace import PhysicalWorkspaceManager
 from .utils import (
     validate_name,
     rand_saveref,
@@ -52,10 +53,17 @@ class PKTGenerator:
         template_links = links_node.findall("LINK") if links_node is not None else []
         self.link_template: Optional[ET.Element] = template_links[0] if template_links else None
 
-        # Cache di riferimento per il Physical Workspace (path base + nodi prototipo)
-        self._base_physical_paths = self._extract_base_physical_paths()
-        self._base_pw_nodes = self._extract_base_pw_nodes()
-        self._pc_parent_node = self._extract_pc_parent_node()
+        # Prototipo del Power Distribution Device (PDU) presente nel template base
+        self._power_proto: Optional[ET.Element] = None
+        for dev in self.template_root.findall("NETWORK/DEVICES/DEVICE"):
+            name = (dev.findtext("ENGINE/NAME") or "").lower()
+            dtype = (dev.findtext("ENGINE/TYPE") or "").lower()
+            if "power distribution" in name or "power distribution" in dtype:
+                self._power_proto = copy.deepcopy(dev)
+                break
+
+        # Gestione del Physical Workspace delegata a un manager specializzato
+        self._pw_manager = PhysicalWorkspaceManager(self.template_root)
 
     def generate(
         self,
@@ -74,8 +82,14 @@ class PKTGenerator:
         devices_elem.clear()
         links_elem.clear()
 
-        # Clean up Physical Workspace (remove orphaned device references)
-        self._cleanup_physical_workspace(root)
+        # Reset Physical Workspace to a clean skeleton (no device nodes)
+        self._pw_manager.reset_physical_workspace(root)
+
+        # Packet Tracer si aspetta un PDU nel rack: reintroducilo dal template base
+        # Solo se abbiamo almeno un device utente; per la generazione "vuota" lasciamo
+        # davvero la lista di dispositivi vuota (utile per i test e per file minimi).
+        if devices_config:
+            self._inject_power_distribution(devices_elem)
 
         # -----------------------
         # GRID layout parameters
@@ -144,11 +158,11 @@ class PKTGenerator:
 
             # Genera un SAVE_REF_ID unico per ogni istanza clonata (match con template PT)
             saveref = rand_saveref()
-            # Aggiorna l'eventuale SAVE_REF_ID esistente; rimuove SAVEREFID legacy se presente
             set_text(engine, "SAVE_REF_ID", saveref, create=True)
+            # Popola <SAVEREFID> solo se il template lo include già, per evitare tag non previsti da PT
             legacy = engine.find("SAVEREFID")
             if legacy is not None:
-                engine.remove(legacy)
+                legacy.text = saveref
             device_saverefs[name] = saveref
 
             # Rigenera tutti gli ID e indirizzi di memoria nel device clonato per evitare collisioni
@@ -207,11 +221,7 @@ class PKTGenerator:
             x = int(dev_cfg.get("x", default_x))
             y = int(dev_cfg.get("y", default_y + y_offset))
 
-            coords = engine.find("COORDSETTINGS")
-            if coords is None:
-                coords = ET.SubElement(engine, "COORDSETTINGS")
-            set_text(coords, "XCOORD", str(x), create=True)
-            set_text(coords, "YCOORD", str(y), create=True)
+            utils.set_coords(engine, x, y)
 
             workspace = new_device.find("WORKSPACE")
             if workspace is not None:
@@ -227,7 +237,7 @@ class PKTGenerator:
             devices_elem.append(new_device)
 
         # Aggiorna il PHYSICALWORKSPACE con i nuovi device/cloni
-        self._sync_physical_workspace(root, devices_elem)
+        self._pw_manager.sync_physical_workspace(root, devices_elem)
 
         # -----------------------
         # Links
@@ -235,6 +245,9 @@ class PKTGenerator:
         if links_config:
             for link_cfg in links_config:
                 self._create_link(links_elem, link_cfg, device_saverefs)
+
+        # Rimuovi eventuali tag legacy non previsti dai template base
+        utils.remove_all_tags(root, "SAVEREFID")
 
         xml_bytes = (
             b'<?xml version="1.0" encoding="utf-8"?>\n'
@@ -316,247 +329,40 @@ class PKTGenerator:
 
         links_elem.append(link)
 
-    def _cleanup_physical_workspace(self, root: ET.Element) -> None:
-        """
-        Rimuove i riferimenti fisici ai device originali del template.
-        I device nel physical workspace hanno TYPE=6.
-        """
-        pw = root.find("PHYSICALWORKSPACE")
-        if pw is None:
-            return
-
-        def remove_device_nodes(parent: ET.Element):
-            # Troviamo tutti i NODE children
-            # Attenzione: i nodi possono essere in CHILDREN o direttamente sotto PW o altri nodi
-            # Nel template analizzato: PW -> NODE (id=0) -> CHILDREN -> NODE (id=1) -> CHILDREN -> NODE (device)
-            
-            # 1. Rimuovi i nodi di tipo 6 (dispositivi) dal genitore corrente
-            to_remove = []
-            for node in parent.findall("NODE"):
-                ntype = node.find("TYPE")
-                if ntype is not None and ntype.text == "6":
-                    to_remove.append(node)
-            
-            for node in to_remove:
-                parent.remove(node)
-                logger.debug("Removed orphaned physical node: %s", node.findtext("NAME"))
-
-            # 2. Ricorsione sui CHILDREN di ogni rimasuglio (Intercity, City, Building...)
-            for node in parent.findall("NODE"):
-                children_node = node.find("CHILDREN")
-                if children_node is not None:
-                    remove_device_nodes(children_node)
-                # Anche se non sono in CHILDREN, Packet Tracer a volte mette nodi annidati direttamente? 
-                # Ma lo standard sembra essere CHILDREN.
-        
-        remove_device_nodes(pw)
-
     # ------------------------------------------------------------------
-    # Physical workspace helpers (portati dal nuovo core generator)
+    # Power Distribution Device helper
     # ------------------------------------------------------------------
-    def _extract_base_physical_paths(self) -> dict[str, list[str]]:
+    def _inject_power_distribution(self, devices_elem: ET.Element) -> None:
         """
-        Estrae i path PHYSICAL dai device del template di base e li usa come
-        percorso canonico per i nuovi device.
+        Reintroduce il PDU del template base con ID e indirizzi nuovi.
+        Packet Tracer rifiuta spesso file senza il PDU quando è presente un rack.
         """
-        paths: dict[str, list[str]] = {}
-        devices_node = self.template_root.find("NETWORK/DEVICES")
-        if devices_node is None:
-            return paths
-
-        for dev in devices_node:
-            type_elem = dev.find("ENGINE/TYPE")
-            phys_elem = dev.find("WORKSPACE/PHYSICAL")
-            if phys_elem is None or phys_elem.text is None:
-                continue
-
-            raw_type = (type_elem.text if type_elem is not None else "").lower()
-            key = (
-                "pc"
-                if "pc" in raw_type or "server" in raw_type else
-                "switch"
-                if "switch" in raw_type else
-                "router"
-                if "router" in raw_type else
-                None
-            )
-            if key is None:
-                continue
-
-            path_parts = [p.strip("{} ") for p in phys_elem.text.split(",") if p.strip()]
-            paths[key] = path_parts
-
-        return paths
-
-    def _extract_base_pw_nodes(self) -> dict[str, ET.Element]:
-        """
-        Recupera i nodi prototipo (router/switch/pc) dal PHYSICALWORKSPACE del template.
-        """
-        nodes: dict[str, ET.Element] = {}
-        pw = self.template_root.find("PHYSICALWORKSPACE")
-        if pw is None:
-            return nodes
-
-        for node in pw.iter("NODE"):
-            name_elem = node.find("NAME")
-            if name_elem is None or name_elem.text is None:
-                continue
-            raw = name_elem.text.lower()
-            key = (
-                "router"
-                if "router0" in raw else
-                "switch"
-                if "switch0" in raw else
-                "pc"
-                if "pc0" in raw else
-                None
-            )
-            if key and key not in nodes:
-                nodes[key] = copy.deepcopy(node)
-
-        return nodes
-
-    def _extract_pc_parent_node(self) -> Optional[ET.Element]:
-        """
-        Trova il NODE padre che contiene PC0 nel PHYSICALWORKSPACE di base.
-        """
-        pw = self.template_root.find("PHYSICALWORKSPACE")
-        if pw is None:
-            return None
-
-        def find_parent_of_pc0(parent: ET.Element) -> Optional[ET.Element]:
-            for child in list(parent):
-                if child.tag == "NODE":
-                    name = child.findtext("NAME")
-                    if name and name.strip() == "PC0":
-                        return parent
-                found = find_parent_of_pc0(child)
-                if found is not None:
-                    return found
-            return None
-
-        return find_parent_of_pc0(pw)
-
-    def _sync_physical_workspace(
-        self,
-        root: ET.Element,
-        devices_elem: ET.Element,
-    ) -> None:
-        """
-        Allinea ogni device (WORKSPACE/PHYSICAL) con il PHYSICALWORKSPACE globale.
-        """
-        if not self._base_physical_paths:
+        if self._power_proto is None:
             return
 
-        pw = root.find("PHYSICALWORKSPACE")
-        if pw is None:
+        # Rimuovi eventuali PDU già presenti per evitare duplicati di nome/UUID
+        for existing in list(devices_elem.findall("DEVICE")):
+            name = (existing.findtext("ENGINE/NAME") or "").lower()
+            if "power distribution device" in name:
+                devices_elem.remove(existing)
+
+        pdu = copy.deepcopy(self._power_proto)
+
+        engine = pdu.find("ENGINE")
+        if engine is None:
             return
 
-        # Nodo Rack (per router/switch e fallback)
-        rack_node: Optional[ET.Element] = None
-        for node in pw.iter("NODE"):
-            name = (node.findtext("NAME") or "").strip()
-            if name == "Rack":
-                rack_node = node
-                break
+        set_text(engine, "NAME", "Power Distribution Device0", create=True)
+        set_text(engine, "SYSNAME", "Power Distribution Device0", create=True)
+        pdu_saveref = rand_saveref()
+        set_text(engine, "SAVE_REF_ID", pdu_saveref, create=True)
+        legacy = engine.find("SAVEREFID")
+        if legacy is not None:
+            legacy.text = pdu_saveref
 
-        # Parent dei PC nel PHYSICALWORKSPACE corrente (non quello della base)
-        def find_pc_parent(node: ET.Element) -> Optional[ET.Element]:
-            for child in list(node):
-                if child.tag == "NODE":
-                    name = child.findtext("NAME")
-                    if name and name.strip() == "PC0":
-                        return node
-                found = find_pc_parent(child)
-                if found is not None:
-                    return found
-            return None
+        # Rigenera ID numerici lunghi per evitare collisioni col template
+        for node in pdu.iter():
+            if node.text and node.text.isdigit() and len(node.text) >= 10:
+                node.text = rand_memaddr()
 
-        pc_parent_node = find_pc_parent(pw) or self._pc_parent_node
-
-        # Index: NAME -> NODE esistente
-        pw_nodes: dict[str, ET.Element] = {}
-        uuid_nodes: dict[str, ET.Element] = {}
-        for node in pw.iter("NODE"):
-            name = (node.findtext("NAME") or "").strip()
-            if name:
-                pw_nodes[name] = node
-            uuid_text = node.findtext("UUID_STR")
-            if uuid_text:
-                uuid_nodes[uuid_text.strip("{}")] = node
-
-        for dev in devices_elem:
-            name_elem = dev.find("ENGINE/NAME")
-            type_elem = dev.find("ENGINE/TYPE")
-            phys_elem = dev.find("WORKSPACE/PHYSICAL")
-            if name_elem is None or type_elem is None or phys_elem is None:
-                continue
-
-            dname = name_elem.text or ""
-            dtype = (type_elem.text or "").lower()
-            if not dname:
-                continue
-
-            # pc/server -> "pc", switch -> "switch", router -> "router"
-            if "pc" in dtype or "server" in dtype:
-                base_key = "pc"
-            elif "switch" in dtype:
-                base_key = "switch"
-            elif "router" in dtype:
-                base_key = "router"
-            else:
-                continue
-
-            base_path = self._base_physical_paths.get(base_key, [])
-            if not base_path:
-                continue
-
-            parent_node = None
-            if len(base_path) >= 2:
-                parent_node = uuid_nodes.get(base_path[-2])
-            if parent_node is None:
-                # fallback: usa Rack come contenitore predefinito
-                parent_node = rack_node
-
-            # GUID nuovo e path fisico aggiornato nel device
-            new_guid = str(uuid.uuid4())
-            new_path = base_path[:-1] + [new_guid]
-            phys_elem.text = ",".join(f"{{{p}}}" for p in new_path)
-
-            # Nodo fisico corrispondente (crea se manca)
-            pw_node = pw_nodes.get(dname)
-            if pw_node is None:
-                proto = self._base_pw_nodes.get(base_key)
-                if proto is not None:
-                    pw_node = copy.deepcopy(proto)
-                    name_field = pw_node.find("NAME")
-                    if name_field is not None:
-                        name_field.text = dname
-
-                    if parent_node is not None:
-                        if parent_node.tag == "CHILDREN":
-                            siblings = parent_node
-                        else:
-                            siblings = parent_node.find("CHILDREN")
-                            if siblings is None:
-                                siblings = ET.SubElement(parent_node, "CHILDREN")
-
-                        existing_named = [
-                            n for n in siblings.findall("NODE")
-                            if (n.findtext("NAME") or "").strip()
-                            and (n.findtext("NAME") or "").lower().startswith(base_key)
-                        ]
-                        base_x = float(pw_node.findtext("X", default="0"))
-                        step_x = 86.0 if base_key == "pc" else 120.0
-                        x_elem = pw_node.find("X")
-                        if x_elem is not None:
-                            x_elem.text = str(base_x + step_x * len(existing_named))
-
-                        siblings.append(pw_node)
-                        pw_nodes[dname] = pw_node
-
-            if pw_node is not None:
-                uuid_elem = pw_node.find("UUID_STR")
-                if uuid_elem is None:
-                    uuid_elem = ET.SubElement(pw_node, "UUID_STR")
-                uuid_elem.text = f"{{{new_guid}}}"
+        devices_elem.append(pdu)

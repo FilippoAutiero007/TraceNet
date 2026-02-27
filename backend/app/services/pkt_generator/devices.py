@@ -48,9 +48,12 @@ def clone_device(
     utils.set_text(engine, "SYSNAME", name, create=False)
 
     # Update the EXISTING <SAVE_REF_ID> tag from the template.
-    # Do NOT create a new <SAVEREFID> (no underscores variant).
     saveref = utils.rand_saveref()
     utils.set_text(engine, "SAVE_REF_ID", saveref, create=True)
+    # Solo se il template aveva giÃ  il tag senza underscore
+    legacy = engine.find("SAVEREFID")
+    if legacy is not None:
+        legacy.text = saveref
     dev_config["_saveref"] = saveref
 
     # ── Normalize device type ─────────────────────────────────────────────────
@@ -107,17 +110,7 @@ def clone_device(
 
     # Update the EXISTING <COORD_SETTINGS> in the template (underscore names).
     # Do NOT create <COORDSETTINGS> / <XCOORD> / <YCOORD>.
-    coord_settings = engine.find("COORD_SETTINGS")
-    if coord_settings is not None:
-        utils.set_text(coord_settings, "X_COORD", str(x), create=True)
-        utils.set_text(coord_settings, "Y_COORD", str(y), create=True)
-        # Leave Z_COORD unchanged (already 0 in the template).
-    else:
-        # Fallback: template had no COORD_SETTINGS, create it from scratch.
-        coord_settings = ET.SubElement(engine, "COORD_SETTINGS")
-        utils.set_text(coord_settings, "X_COORD", str(x), create=True)
-        utils.set_text(coord_settings, "Y_COORD", str(y), create=True)
-        utils.set_text(coord_settings, "Z_COORD", "0",    create=True)
+    utils.set_coords(engine, x, y)
 
     # Mirror coordinates in WORKSPACE/LOGICAL and assign unique memory addresses.
     workspace = new_device.find("WORKSPACE")
