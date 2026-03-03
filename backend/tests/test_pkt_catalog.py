@@ -2,7 +2,11 @@
 Integration tests for PKT Generator with Device Catalog.
 """
 import pytest
-from app.services.pkt_generator.core import PKTGenerator
+from pathlib import Path
+import xml.etree.ElementTree as ET
+
+from app.services.pkt_crypto import decrypt_pkt_data
+from app.services.pkt_generator.generator import PKTGenerator
 
 def test_catalog_loading():
     """Test that the catalog is loaded correctly."""
@@ -17,15 +21,15 @@ def test_resolve_device_type():
     
     # Exact match
     meta = generator.resolve_device_type("router-8port")
-    assert meta["base_template"].endswith("router_8port.pkt")
+    assert meta["template_file"].endswith("router_8port.pkt")
     
     # Validation of fallback (router)
     meta = generator.resolve_device_type("router-unknown-type")
-    assert meta["base_template"].endswith("router_2port.pkt") # Default fallback
+    assert meta["template_file"].endswith("router_2port.pkt") # Default fallback
 
     # Validation of fallback (general)
     meta = generator.resolve_device_type("unknown-device")
-    assert meta["base_template"].endswith("pc.pkt") # Default fallback
+    assert meta["template_file"].endswith("pc.pkt") # Default fallback
 
 def test_template_path_resolution(monkeypatch):
     """Test that we can actually find the templates referenced in the catalog."""
@@ -46,7 +50,10 @@ def test_generation_with_catalog():
     ]
     
     try:
-        root = generator.generate(devices_config)
+        out = Path("tmp_step1") / "test_generation_with_catalog.pkt"
+        out.parent.mkdir(exist_ok=True)
+        generator.generate(devices_config, links_config=[], output_path=str(out))
+        root = ET.fromstring(decrypt_pkt_data(out.read_bytes()))
         
         # Check if devices were created
         network = root.find("NETWORK")
@@ -85,7 +92,10 @@ def test_link_structure_no_flat_tags():
     ]
 
     try:
-        root = generator.generate(devices_config, links_config)
+        out = Path("tmp_step1") / "test_link_structure_no_flat_tags.pkt"
+        out.parent.mkdir(exist_ok=True)
+        generator.generate(devices_config, links_config, output_path=str(out))
+        root = ET.fromstring(decrypt_pkt_data(out.read_bytes()))
     except FileNotFoundError:
         pytest.skip("Templates not found in test environment")
 

@@ -14,6 +14,17 @@ from app.services.pkt_generator import utils
 logger = logging.getLogger(__name__)
 
 
+def _infer_device_type(device_name: str) -> str:
+    name_lower = device_name.lower()
+    if "router" in name_lower or name_lower.startswith("r"):
+        return "router"
+    if "switch" in name_lower or "sw" in name_lower:
+        return "switch"
+    if "pc" in name_lower or "host" in name_lower or "end" in name_lower:
+        return "pc"
+    return "router"
+
+
 def create_link(
     link_template: ET.Element,
     link_cfg: Dict[str, Any],
@@ -57,6 +68,29 @@ def create_link(
         # Populate mandatory CABLE defaults if created from scratch
         utils.set_text(cable, "LENGTH", "1", create=True)
         utils.set_text(cable, "FUNCTIONAL", "true", create=True)
+
+    # Auto-detect cable type unless explicitly provided.
+    # 0 = straight-through, 4 = cross-over
+    cable_type = link_cfg.get("cable_type")
+    if cable_type is None:
+        from_type = _infer_device_type(from_name)
+        to_type = _infer_device_type(to_name)
+        cable_type = "eCrossOver" if from_type == to_type else "eStraightThrough"
+        logger.info(
+            "Auto-selected cable type %s for %s (%s) -> %s (%s)",
+            cable_type,
+            from_name,
+            from_type,
+            to_name,
+            to_type,
+        )
+    else:
+        cable_type = str(cable_type).strip()
+        if cable_type == "4":
+            cable_type = "eCrossOver"
+        elif cable_type == "0":
+            cable_type = "eStraightThrough"
+    utils.set_text(cable, "TYPE", cable_type, create=True)
 
     # Set FROM and TO references inside CABLE
     utils.set_text(cable, "FROM", from_saveref, create=True)
