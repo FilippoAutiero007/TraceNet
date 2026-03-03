@@ -13,6 +13,8 @@ __pycache__/
 venv/
 env/
 ENV/
+.tmp_*.py
+.tmp_*.pyc
 .pytest_cache/
 .coverage
 htmlcov/

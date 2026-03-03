@@ -1,13 +1,10 @@
-"""
-Compatibility wrapper exposing high-level PKT generation helpers.
+"""Backwards-compatible re-exports for topology helpers.
 
-Historically the project referenced `app.services.pkt_file_generator`.
-The core implementation now lives under `app.services.pkt_generator.*`,
-so this module re-exports the pieces that tests and callers rely on.
+Historically, some code/tests imported `build_links_config` from this module.
+The implementation lives in `app.services.pkt_generator.topology`.
 """
-
-from __future__ import annotations
 
 from app.services.pkt_generator.topology import build_links_config
 
 __all__ = ["build_links_config"]
+
