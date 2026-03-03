@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Hero } from '@/sections/Hero';
+import { SEOHead } from '@/components/SEOHead';
 
 const Features = lazy(() => import('@/sections/Features').then((m) => ({ default: m.Features })));
 const Pricing = lazy(() => import('@/sections/Pricing').then((m) => ({ default: m.Pricing })));
@@ -8,6 +9,7 @@ const Footer = lazy(() => import('@/sections/Footer').then((m) => ({ default: m.
 export function Landing() {
   return (
     <>
+      <SEOHead />
       <main>
         <Hero />
         <Suspense fallback={<div className="min-h-[200px] bg-slate-950" />}>

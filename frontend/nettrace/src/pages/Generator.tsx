@@ -12,6 +12,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence, type Easing } from 'framer-motion';
 import { useUser } from '@clerk/clerk-react';
 import { useLanguage } from '@/context/LanguageContext';
+import { SEOHead } from '@/components/SEOHead';
 
 interface SubnetInfo { name: string; network: string; gateway: string; usable_hosts: number; }
 interface ConfigSummary { base_network: string; subnets_count: number; routers: number; switches: number; pcs: number; routing_protocol: string; }
@@ -227,12 +228,20 @@ export function Generator() {
   const isGenerating = step === 'parsing' || step === 'calculating' || step === 'generating';
 
   return (
-    <motion.div 
-      className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-950 to-slate-900 pt-20 pb-12 px-4"
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-    >
+    <>
+      <SEOHead 
+        title={t('generator.title')}
+        description={`${t('generator.subtitle')} ${t('generator.subtitle2')}`}
+        keywords="network generator, cisco packet tracer, AI network simulation, network topology generator"
+        ogUrl="https://nettrace.app/generator"
+        canonicalUrl="https://nettrace.app/generator"
+      />
+      <motion.div 
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-950 to-slate-900 pt-20 pb-12 px-4"
+        initial="hidden"
+        animate="visible"
+        variants={containerVariants}
+      >
       <div className="max-w-7xl mx-auto">
         {/* Header row */}
         <motion.div variants={itemVariants} className="flex items-center justify-between mb-8">
@@ -409,5 +418,6 @@ export function Generator() {
         </AnimatePresence>
       </div>
     </motion.div>
+    </>
   );
 }
