@@ -216,13 +216,16 @@ def decrypt_pkt_data(pkt_data: bytes) -> bytes:
 
     # Defensive check for compressed payload header.
     # Accept both GZIP (1f 8b) and ZLIB streams to avoid cryptic crashes on malformed files.
+    codec = "gzip" if compressed[:2] == bytes((0x1F, 0x8B)) else "zlib"
     try:
-        if compressed[:2] == bytes((0x1F, 0x8B)):
+        if codec == "gzip":
             xml_data = gzip.decompress(compressed)[:size]
         else:
             xml_data = zlib.decompress(compressed)[:size]
     except Exception as exc:
-        raise ValueError("Invalid compressed payload in PKT file") from exc
+        raise ValueError(
+            f"Invalid {codec} compressed payload in PKT file: {exc.__class__.__name__}: {exc}"
+        ) from exc
 
     return xml_data
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 from datetime import datetime
@@ -55,27 +56,71 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
 
         # PC: usa l'id che hai definito nel JSON per gli end device, qui assumo "pc"
         pc_idx = 0
+        subnet_allocators: list[dict[str, Any]] = []
         for subnet in subnets:
-            subnet_pcs = min(3, max(0, num_pcs - pc_idx))
-            for i in range(subnet_pcs):
+            usable_range = getattr(subnet, "usable_range", None)
+            if not isinstance(usable_range, list) or len(usable_range) != 2:
+                logger.warning("Invalid usable_range for subnet %s: %r", getattr(subnet, "name", "?"), usable_range)
+                continue
+
+            try:
+                start_ip = ipaddress.ip_address(str(usable_range[0]))
+                end_ip = ipaddress.ip_address(str(usable_range[1]))
+            except ValueError:
+                logger.warning("Unparseable usable_range for subnet %s: %r", getattr(subnet, "name", "?"), usable_range)
+                continue
+
+            if int(start_ip) > int(end_ip):
+                logger.warning("Empty usable_range for subnet %s: %r", getattr(subnet, "name", "?"), usable_range)
+                continue
+
+            subnet_allocators.append(
+                {
+                    "name": getattr(subnet, "name", ""),
+                    "mask": getattr(subnet, "mask", "255.255.255.0"),
+                    "next_ip": start_ip,
+                    "end_ip": end_ip,
+                }
+            )
+
+        while pc_idx < num_pcs and subnet_allocators:
+            made_progress = False
+            for alloc in subnet_allocators:
                 if pc_idx >= num_pcs:
                     break
-                usable = getattr(subnet, "usable_range", [])
-                ip = usable[i] if i < len(usable) else ""
-                devices_config.append({
-                    "name": safe_name("PC", pc_idx),
-                    "type": "pc",
-                    "ip": ip,
-                    "subnet": getattr(subnet, "mask", "255.255.255.0"),
-                })
-                pc_idx += 1
+                if int(alloc["next_ip"]) > int(alloc["end_ip"]):
+                    continue
 
-        while pc_idx < num_pcs:
-            devices_config.append({
-                "name": safe_name("PC", pc_idx),
-                "type": "pc",
-            })
-            pc_idx += 1
+                ip = str(alloc["next_ip"])
+                alloc["next_ip"] = ipaddress.ip_address(int(alloc["next_ip"]) + 1)
+                devices_config.append(
+                    {
+                        "name": safe_name("PC", pc_idx),
+                        "type": "pc",
+                        "ip": ip,
+                        "subnet": alloc["mask"],
+                    }
+                )
+                pc_idx += 1
+                made_progress = True
+
+            if not made_progress:
+                break
+
+        if pc_idx < num_pcs:
+            logger.warning(
+                "Not enough usable IPs to assign all PCs: assigned=%s requested=%s",
+                pc_idx,
+                num_pcs,
+            )
+            while pc_idx < num_pcs:
+                devices_config.append(
+                    {
+                        "name": safe_name("PC", pc_idx),
+                        "type": "pc",
+                    }
+                )
+                pc_idx += 1
 
         links_config = build_links_config(num_routers, num_switches, num_pcs)
         logger.info("Generating %s devices and %s links", len(devices_config), len(links_config))

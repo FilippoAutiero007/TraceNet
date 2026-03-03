@@ -30,6 +30,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["generate"])
 
 
+def _validate_filename(filename: str) -> str:
+    """Path traversal guard for downloadable filenames."""
+    import re
+
+    if not re.match(r"^[\\w\\-\\.]+$", filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    return filename
+
+
 @router.post("/parse-network-request", response_model=ParseNetworkResponse)
 async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
@@ -97,8 +110,11 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
         os.makedirs(output_dir, exist_ok=True)
         
         # Lock con timeout per evitare deadlock (max 30 secondi)
-        if not _pkt_generation_lock.acquire(timeout=30):
-            raise Exception("Server busy: PKT generation lock timeout. Please try again later.")
+        acquired = _pkt_generation_lock.acquire(timeout=30)
+        if not acquired:
+            error_msg = "Server busy: PKT generation is already running. Please retry in a few seconds."
+            logger.warning("PKT generation lock timeout after 30s")
+            return PktGenerateResponse(success=False, error=error_msg)
         
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
@@ -164,8 +180,11 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
         os.makedirs(output_dir, exist_ok=True)
         
         # Lock con timeout per evitare deadlock (max 30 secondi)
-        if not _pkt_generation_lock.acquire(timeout=30):
-            raise Exception("Server busy: PKT generation lock timeout. Please try again later.")
+        acquired = _pkt_generation_lock.acquire(timeout=30)
+        if not acquired:
+            error_msg = "Server busy: PKT generation is already running. Please retry in a few seconds."
+            logger.warning("Manual PKT generation lock timeout after 30s")
+            return ManualPktGenerateResponse(success=False, error=error_msg)
         
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
@@ -217,14 +236,9 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
 @router.get("/download/{filename}")
 async def download_file(filename: str):
     """Download generated .pkt or .xml file with path traversal protection"""
-    import re
     from pathlib import Path
     
-    if not re.match(r'^[\w\-\.]+$', filename):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    
-    if '..' in filename or '/' in filename or '\\' in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
+    _validate_filename(filename)
     
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
     filepath = Path(output_dir) / filename

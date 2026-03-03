@@ -172,11 +172,20 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
     api_key = os.environ.get("MISTRAL_API_KEY")
     if not api_key:
         logger.warning("MISTRAL_API_KEY not found. NLP parsing is disabled.")
+        merged = _merge_with_state({}, current_state)
+        missing, normalized = _validate_normalized_json(merged)
+        if missing:
+            return ParseNetworkResponse(
+                intent=ParseIntent.INCOMPLETE,
+                missing=missing,
+                json={},
+                error="NLP Service Unavailable: Mistral API Key missing on server.",
+            )
         return ParseNetworkResponse(
-            intent=ParseIntent.NOT_NETWORK, 
-            missing=[], 
-            json={}, 
-            error="NLP Service Unavailable: Mistral API Key missing on server."
+            intent=ParseIntent.COMPLETE,
+            missing=[],
+            json=normalized,
+            error="NLP Service Unavailable: Mistral API Key missing on server.",
         )
 
     client = Mistral(api_key=api_key)

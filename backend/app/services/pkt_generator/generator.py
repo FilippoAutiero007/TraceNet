@@ -91,16 +91,26 @@ class PKTGenerator:
             dev_type = str(dev_cfg.get("type", "router-1port")).strip()
 
             # 1) Metadati dal JSON
-            device_meta = DEVICE_TEMPLATES.get(dev_type)
+            resolved_type = dev_type
+            device_meta = DEVICE_TEMPLATES.get(resolved_type)
             if device_meta is None:
-                logger.warning(
-                    "Unknown device type %s, falling back to router-1port",
-                    dev_type,
-                )
-                device_meta = DEVICE_TEMPLATES["router-1port"]
+                logger.warning("Unknown device type %s, falling back to router-1port", resolved_type)
+                resolved_type = "router-1port"
+                device_meta = DEVICE_TEMPLATES[resolved_type]
 
             relative_template = device_meta["template_file"]  # es. "Router/router_2port.pkt"
             template_path = TEMPLATES_BASE_DIR / relative_template
+
+            if not template_path.exists() and resolved_type != "router-1port":
+                logger.warning(
+                    "Template file missing for %s (%s); falling back to router-1port",
+                    dev_type,
+                    template_path,
+                )
+                resolved_type = "router-1port"
+                device_meta = DEVICE_TEMPLATES[resolved_type]
+                relative_template = device_meta["template_file"]
+                template_path = TEMPLATES_BASE_DIR / relative_template
 
             if not template_path.exists():
                 raise FileNotFoundError(f"Template file not found: {template_path}")
