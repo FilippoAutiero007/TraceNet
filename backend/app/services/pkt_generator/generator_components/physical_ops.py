@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import uuid
 import xml.etree.ElementTree as ET
-from typing import Optional
+from typing import Any, Optional
 
 
 class PhysicalWorkspaceOps:
@@ -102,7 +102,12 @@ class PhysicalWorkspaceOps:
         if self._pc_parent_node is None:
             self._pc_parent_node = self._extract_pc_parent_node()
 
-    def sync(self, root: ET.Element, devices_elem: ET.Element) -> None:
+    def sync(
+        self,
+        root: ET.Element,
+        devices_elem: ET.Element,
+        device_physical_hints: Optional[dict[str, dict[str, Any]]] = None,
+    ) -> None:
         self._ensure_cache()
         if not self._base_physical_paths:
             return
@@ -143,6 +148,7 @@ class PhysicalWorkspaceOps:
             phys_elem = dev.find("WORKSPACE/PHYSICAL")
             if not dname or phys_elem is None:
                 continue
+            hint = (device_physical_hints or {}).get(dname, {})
 
             if "pc" in dtype or "server" in dtype:
                 base_key = "pc"
@@ -153,7 +159,9 @@ class PhysicalWorkspaceOps:
             else:
                 continue
 
-            base_path = self._base_physical_paths.get(base_key, [])
+            hinted_path = hint.get("path_parts") or []
+            use_hinted_path = bool(hinted_path) and all(part in uuid_nodes for part in hinted_path[:-1])
+            base_path = hinted_path if use_hinted_path else self._base_physical_paths.get(base_key, [])
             if not base_path:
                 continue
 
@@ -166,7 +174,9 @@ class PhysicalWorkspaceOps:
 
             pw_node = pw_nodes.get(dname)
             if pw_node is None:
-                proto = self._base_pw_nodes.get(base_key) if self._base_pw_nodes else None
+                proto = hint.get("proto_node")
+                if proto is None and self._base_pw_nodes:
+                    proto = self._base_pw_nodes.get(base_key)
                 if proto is not None:
                     pw_node = copy.deepcopy(proto)
                     name_field = pw_node.find("NAME")

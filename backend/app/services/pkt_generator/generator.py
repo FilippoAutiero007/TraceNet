@@ -79,17 +79,22 @@ class PKTGenerator:
         num_devices = len(devices_config)
         cols = 2 if num_devices <= 4 else 3 if num_devices <= 9 else 4
         used_macs: set[str] = set()
+        used_dev_addrs: set[str] = set()
+        used_mem_addrs: set[str] = set()
         device_saverefs: dict[str, str] = {}
+        device_physical_hints: dict[str, dict[str, Any]] = {}
 
         for idx, dev_cfg in enumerate(devices_config):
             try:
-                new_device, name, saveref, category = build_device(
+                new_device, name, saveref, category, physical_hint = build_device(
                     dev_cfg=dev_cfg,
                     idx=idx,
                     cols=cols,
                     templates_base_dir=TEMPLATES_BASE_DIR,
                     device_templates=DEVICE_TEMPLATES,
                     used_macs=used_macs,
+                    used_dev_addrs=used_dev_addrs,
+                    used_mem_addrs=used_mem_addrs,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping device %s: %s", dev_cfg.get("name"), exc)
@@ -98,8 +103,10 @@ class PKTGenerator:
             devices_elem.append(new_device)
             device_saverefs[name] = saveref
             self._device_types_by_name[name] = category
+            if physical_hint:
+                device_physical_hints[name] = physical_hint
 
-        self._physical_ops.sync(root, devices_elem)
+        self._physical_ops.sync(root, devices_elem, device_physical_hints=device_physical_hints)
 
         requested_links = len(links_config or [])
         if links_config:

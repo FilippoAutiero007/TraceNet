@@ -5,7 +5,7 @@ import logging
 import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
-from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_name
+from app.services.pkt_generator.utils import validate_name
 
 logger = logging.getLogger(__name__)
 
@@ -35,24 +35,10 @@ def _reorder_cable_children(cable: ET.Element) -> None:
         items = nodes_by_tag.get(tag, [])
         if not items:
             continue
-        if tag == "PORT":
-            cable.append(items.pop(0))
-            if items:
-                cable.append(items.pop(0))
-            continue
         cable.append(items.pop(0))
     for remaining in nodes_by_tag.values():
         for child in remaining:
             cable.append(child)
-
-
-def _normalize_cable_type(cable_type: Any) -> str:
-    val = str(cable_type).strip()
-    if val == "4":
-        return "eCrossOver"
-    if val == "0":
-        return "eStraightThrough"
-    return val
 
 
 def create_link(
@@ -78,28 +64,36 @@ def create_link(
     link = copy.deepcopy(link_template)
     cable = link.find("CABLE")
     if cable is None:
-        cable = ET.SubElement(link, "CABLE")
-        set_text(cable, "LENGTH", "1", create=True)
-        set_text(cable, "FUNCTIONAL", "true", create=True)
+        logger.error("Template link has no CABLE node!")
+        return False
 
-    cable_type = link_cfg.get("cable_type")
-    if cable_type is None:
-        from_type = get_device_type(from_name)
-        to_type = get_device_type(to_name)
-        cable_type = "eCrossOver" if from_type == to_type else "eStraightThrough"
-        logger.info("Auto-selected %s cable for %s ↔ %s", cable_type, from_name, to_name)
-    set_text(cable, "TYPE", _normalize_cable_type(cable_type), create=True)
+    from_elem = cable.find("FROM")
+    if from_elem is not None:
+        from_elem.text = from_saveref
 
-    set_text(cable, "FROM", from_saveref, create=True)
-    set_text(cable, "TO", to_saveref, create=True)
+    to_elem = cable.find("TO")
+    if to_elem is not None:
+        to_elem.text = to_saveref
+
     ports = cable.findall("PORT")
-    while len(ports) < 2:
-        ports.append(ET.SubElement(cable, "PORT"))
-    ports[0].text = str(link_cfg.get("from_port", "FastEthernet0/0"))
-    ports[1].text = str(link_cfg.get("to_port", "FastEthernet0/1"))
+    if len(ports) >= 2:
+        ports[0].text = str(link_cfg.get("from_port", "FastEthernet0/0"))
+        ports[1].text = str(link_cfg.get("to_port", "FastEthernet0/0"))
 
-    for tag in ("FROM_DEVICE_MEM_ADDR", "TO_DEVICE_MEM_ADDR", "FROM_PORT_MEM_ADDR", "TO_PORT_MEM_ADDR"):
-        set_text(cable, tag, rand_memaddr(), create=True)
+    type_elem = cable.find("TYPE")
+    if type_elem is not None:
+        cable_type = link_cfg.get("cable_type")
+        if cable_type is None:
+            from_type = get_device_type(from_name)
+            to_type = get_device_type(to_name)
+            cable_type = "eCrossOver" if from_type == to_type else "eStraightThrough"
+            logger.info("Auto-selected %s for %s ↔ %s", cable_type, from_name, to_name)
+        norm = str(cable_type).strip()
+        if norm == "4":
+            norm = "eCrossOver"
+        elif norm == "0":
+            norm = "eStraightThrough"
+        type_elem.text = norm
 
     _reorder_cable_children(cable)
     links_elem.append(link)

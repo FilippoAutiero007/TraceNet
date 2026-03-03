@@ -3,11 +3,11 @@ from __future__ import annotations
 import copy
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.services.pkt_crypto import decrypt_pkt_data
 from app.services.pkt_generator import utils
-from app.services.pkt_generator.utils import set_text, validate_name, rand_saveref
+from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_name, rand_saveref
 
 
 def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
@@ -81,7 +81,9 @@ def build_device(
     templates_base_dir: Path,
     device_templates: dict[str, dict[str, Any]],
     used_macs: set[str],
-) -> tuple[ET.Element, str, str, str]:
+    used_dev_addrs: set[str],
+    used_mem_addrs: set[str],
+) -> tuple[ET.Element, str, str, str, Optional[dict[str, Any]]]:
     name = validate_name(dev_cfg["name"])
     requested_type = str(dev_cfg.get("type", "router-1port")).strip()
 
@@ -114,7 +116,8 @@ def build_device(
     if not template_devices:
         raise ValueError(f"Invalid device template {template_path}: no DEVICE found")
 
-    new_device = copy.deepcopy(template_devices[0])
+    template_device = template_devices[0]
+    new_device = copy.deepcopy(template_device)
     engine = new_device.find("ENGINE")
     if engine is None:
         raise ValueError(f"Invalid device template {template_path}: missing ENGINE")
@@ -142,9 +145,35 @@ def build_device(
         if logical is not None:
             set_text(logical, "X", str(x), create=True)
             set_text(logical, "Y", str(y), create=True)
+            dev_addr = rand_memaddr()
+            while dev_addr in used_dev_addrs:
+                dev_addr = rand_memaddr()
+            used_dev_addrs.add(dev_addr)
+            set_text(logical, "DEV_ADDR", dev_addr, create=True)
+
+            mem_addr = rand_memaddr()
+            while mem_addr in used_mem_addrs:
+                mem_addr = rand_memaddr()
+            used_mem_addrs.add(mem_addr)
+            set_text(logical, "MEM_ADDR", mem_addr, create=True)
 
     if dev_cfg.get("ip"):
         _update_device_ip(engine, dev_cfg)
 
     category = (device_meta.get("category") or resolved_type or "").lower()
-    return new_device, name, saveref, category
+    physical_hint: Optional[dict[str, Any]] = None
+    phys_text = template_device.findtext("WORKSPACE/PHYSICAL")
+    if phys_text:
+        path_parts = [part.strip("{} ") for part in phys_text.split(",") if part.strip()]
+        if path_parts:
+            proto_node: Optional[ET.Element] = None
+            pw = template_root.find("PHYSICALWORKSPACE")
+            if pw is not None:
+                leaf_uuid = path_parts[-1]
+                for node in pw.iter("NODE"):
+                    uuid_text = (node.findtext("UUID_STR") or "").strip("{} ")
+                    if uuid_text == leaf_uuid:
+                        proto_node = copy.deepcopy(node)
+                        break
+            physical_hint = {"path_parts": path_parts, "proto_node": proto_node}
+    return new_device, name, saveref, category, physical_hint
