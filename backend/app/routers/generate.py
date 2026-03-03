@@ -34,11 +34,9 @@ def _validate_filename(filename: str) -> str:
     """Path traversal guard for downloadable filenames."""
     import re
 
-    # Permette solo lettere, numeri, underscore, trattino, punto
     if not re.match(r'^[\w\-\.]+$', filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    # Blocca sequenze di path traversal
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
@@ -56,7 +54,6 @@ async def download_file(filename: str):
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
     filepath = Path(output_dir) / filename
 
-    # Controllo definitivo: il file deve stare dentro output_dir
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
             raise HTTPException(status_code=403, detail="Access denied")
@@ -66,7 +63,6 @@ async def download_file(filename: str):
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Determina il media type
     if filename.endswith(".pkt"):
         media_type = "application/gzip"
     elif filename.endswith(".xml"):
@@ -75,8 +71,8 @@ async def download_file(filename: str):
         media_type = "application/octet-stream"
 
     return FileResponse(
-        path=str(filepath), 
-        media_type=media_type, 
+        path=str(filepath),
+        media_type=media_type,
         filename=filename
     )
 
@@ -89,9 +85,9 @@ async def parse_network_endpoint(request: ParseNetworkRequest):
     except Exception as exc:
         logger.error("Parse network request failed: %s", exc, exc_info=True)
         return ParseNetworkResponse(
-            intent=ParseIntent.NOT_NETWORK, 
-            missing=[], 
-            json={}, 
+            intent=ParseIntent.NOT_NETWORK,
+            missing=[],
+            json={},
             error=f"Parser error: {str(exc)}"
         )
 
@@ -146,18 +142,21 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
-        
-        # Lock con timeout per evitare deadlock (max 30 secondi)
+
         if not _pkt_generation_lock.acquire(timeout=30):
-            raise Exception("Server busy: PKT generation lock timeout. Please try again later.")
-        
+            logger.warning("PKT generation lock timeout after 30s (generate-pkt)")
+            raise TimeoutError(
+                "Il server è occupato con un'altra generazione. "
+                "Riprova tra qualche secondo."
+            )
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
             _pkt_generation_lock.release()
 
         if not result.get("success"):
-            raise Exception(result.get("error", "Unknown error during PKT file save"))
+            raise RuntimeError(result.get("error", "Unknown error during PKT file save"))
 
         pkt_filename = os.path.basename(result["pkt_path"])
         xml_filename = os.path.basename(result["xml_path"])
@@ -213,18 +212,21 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
-        
-        # Lock con timeout per evitare deadlock (max 30 secondi)
+
         if not _pkt_generation_lock.acquire(timeout=30):
-            raise Exception("Server busy: PKT generation lock timeout. Please try again later.")
-        
+            logger.warning("PKT generation lock timeout after 30s (generate-pkt-manual)")
+            raise TimeoutError(
+                "Il server è occupato con un'altra generazione. "
+                "Riprova tra qualche secondo."
+            )
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
             _pkt_generation_lock.release()
 
         if not result.get("success"):
-            raise Exception(result.get("error", "Unknown error during manual PKT file save"))
+            raise RuntimeError(result.get("error", "Unknown error during manual PKT file save"))
 
         pkt_filename = os.path.basename(result["pkt_path"])
         xml_filename = os.path.basename(result["xml_path"])
@@ -263,35 +265,6 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
         error_msg = f"PKT generation failed: {str(exc)}"
         logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
         return ManualPktGenerateResponse(success=False, error=error_msg)
-
-
-@router.get("/download/{filename}")
-async def download_file(filename: str):
-    """Download generated .pkt or .xml file with path traversal protection"""
-    from pathlib import Path
-
-    _validate_filename(filename)
-
-    output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
-    filepath = Path(output_dir) / filename
-
-    try:
-        if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
-            raise HTTPException(status_code=403, detail="Access denied")
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if not filepath.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    if filename.endswith(".pkt"):
-        media_type = "application/gzip"
-    elif filename.endswith(".xml"):
-        media_type = "application/xml"
-    else:
-        media_type = "application/octet-stream"
-
-    return FileResponse(path=str(filepath), media_type=media_type, filename=filename)
 
 
 @router.get("/templates")
