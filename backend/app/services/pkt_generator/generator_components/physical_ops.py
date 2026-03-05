@@ -122,6 +122,7 @@ class PhysicalWorkspaceOps:
 
         pw_nodes: dict[str, ET.Element] = {}
         uuid_nodes: dict[str, ET.Element] = {}
+        claimed_pw_nodes: set[int] = set()
         for node in pw.iter("NODE"):
             name = (node.findtext("NAME") or "").strip()
             if name:
@@ -153,7 +154,9 @@ class PhysicalWorkspaceOps:
                 continue
 
             hinted_path = hint.get("path_parts") or []
-            use_hinted_path = bool(hinted_path) and all(part in uuid_nodes for part in hinted_path[:-1])
+            # Use a hinted path only when the full chain (including leaf node) exists
+            # in the current base workspace. Otherwise fall back to a safe base path.
+            use_hinted_path = bool(hinted_path) and all(part in uuid_nodes for part in hinted_path)
             base_path = (
                 hinted_path
                 if use_hinted_path
@@ -170,15 +173,19 @@ class PhysicalWorkspaceOps:
             phys_elem.text = ",".join(f"{{{part}}}" for part in (base_path[:-1] + [new_guid]))
 
             pw_node = pw_nodes.get(dname)
+            if pw_node is not None:
+                claimed_pw_nodes.add(id(pw_node))
             if pw_node is None and hinted_path:
                 hinted_leaf = hinted_path[-1]
-                pw_node = uuid_nodes.get(hinted_leaf)
-                if pw_node is not None:
+                hinted_candidate = uuid_nodes.get(hinted_leaf)
+                if hinted_candidate is not None and id(hinted_candidate) not in claimed_pw_nodes:
+                    pw_node = hinted_candidate
                     name_field = pw_node.find("NAME")
                     if name_field is None:
                         name_field = ET.SubElement(pw_node, "NAME")
                     name_field.text = dname
                     pw_nodes[dname] = pw_node
+                    claimed_pw_nodes.add(id(pw_node))
 
             if pw_node is None:
                 proto = hint.get("proto_node")
@@ -187,8 +194,9 @@ class PhysicalWorkspaceOps:
                 if proto is not None:
                     pw_node = copy.deepcopy(proto)
                     name_field = pw_node.find("NAME")
-                    if name_field is not None:
-                        name_field.text = dname
+                    if name_field is None:
+                        name_field = ET.SubElement(pw_node, "NAME")
+                    name_field.text = dname
                     if parent_node is not None:
                         siblings = parent_node if parent_node.tag == "CHILDREN" else parent_node.find("CHILDREN")
                         if siblings is None:
@@ -206,8 +214,12 @@ class PhysicalWorkspaceOps:
                             x_elem.text = str(base_x + step_x * len(existing_named))
                         siblings.append(pw_node)
                         pw_nodes[dname] = pw_node
+                        claimed_pw_nodes.add(id(pw_node))
 
             if pw_node is not None:
+                stale_uuids = [k for k, v in uuid_nodes.items() if v is pw_node]
+                for stale in stale_uuids:
+                    del uuid_nodes[stale]
                 uuid_elem = pw_node.find("UUID_STR")
                 if uuid_elem is None:
                     uuid_elem = ET.SubElement(pw_node, "UUID_STR")

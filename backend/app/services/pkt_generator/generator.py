@@ -92,7 +92,8 @@ class PKTGenerator:
         root = self._load_template_root_for_device_type(base_type)
         self.template_root = root
         self.link_template = self._extract_link_template(root)
-        self._physical_ops = PhysicalWorkspaceOps(root)
+        # Keep an untouched snapshot so PhysicalWorkspaceOps caches true base paths.
+        self._physical_ops = PhysicalWorkspaceOps(copy.deepcopy(root))
 
         network = root.find("NETWORK")
         if network is None:

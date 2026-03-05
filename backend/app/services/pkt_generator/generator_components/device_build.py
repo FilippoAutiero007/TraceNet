@@ -95,6 +95,13 @@ def build_device(
 
     relative_template = device_meta["template_file"]
     template_path = templates_base_dir / relative_template
+    if not template_path.exists():
+        # Backward-compatible alias for historical catalog typo.
+        candidate = templates_base_dir / relative_template.replace("FinalPoint/", "EndPoint/")
+        if candidate != template_path and candidate.exists():
+            template_path = candidate
+            relative_template = str(Path("EndPoint") / Path(relative_template).name)
+
     if not template_path.exists() and resolved_type != "router-1port":
         resolved_type = "router-1port"
         device_meta = device_templates[resolved_type]
