@@ -6,6 +6,13 @@ from .utils import safe_name
 
 def build_links_config(num_routers: int, num_switches: int, num_pcs: int) -> list[dict[str, str]]:
     links_config: list[dict[str, str]] = []
+    extra_uplink_ports = [
+        "FastEthernet1/0",
+        "FastEthernet0/1",
+        "FastEthernet1/1",
+        "GigabitEthernet0/0",
+        "GigabitEthernet0/1",
+    ]
 
     if num_routers > 0 and num_switches > 0:
         for i in range(min(num_routers, num_switches)):
@@ -18,10 +25,10 @@ def build_links_config(num_routers: int, num_switches: int, num_pcs: int) -> lis
 
         if num_switches > num_routers:
             for i in range(num_routers, num_switches):
-                port_idx = i - num_routers + 1
+                extra_idx = i - num_routers
                 links_config.append({
                     "from": safe_name("Router", num_routers - 1),
-                    "from_port": f"FastEthernet0/{port_idx}",
+                    "from_port": extra_uplink_ports[extra_idx % len(extra_uplink_ports)],
                     "to": safe_name("Switch", i),
                     "to_port": "FastEthernet0/1",
                 })

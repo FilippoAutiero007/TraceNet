@@ -64,6 +64,10 @@ class PKTGenerator:
         relative_template = str(resolved_meta.get("template_file", "")).strip()
         template_path = TEMPLATES_BASE_DIR / relative_template
         if not template_path.exists():
+            alias_path = TEMPLATES_BASE_DIR / relative_template.replace("FinalPoint/", "EndPoint/")
+            if alias_path.exists():
+                template_path = alias_path
+        if not template_path.exists():
             raise FileNotFoundError(f"Device template not found: {template_path}")
         return template_path
 
@@ -112,6 +116,8 @@ class PKTGenerator:
         used_dev_addrs: set[str] = set()
         used_mem_addrs: set[str] = set()
         device_saverefs: dict[str, str] = {}
+        device_dev_addrs: dict[str, str] = {}
+        port_mem_addrs: dict[tuple[str, str], str] = {}
         device_physical_hints: dict[str, dict[str, Any]] = {}
 
         for idx, dev_cfg in enumerate(devices_config):
@@ -132,6 +138,9 @@ class PKTGenerator:
 
             devices_elem.append(new_device)
             device_saverefs[name] = saveref
+            dev_addr = (new_device.findtext("WORKSPACE/LOGICAL/DEV_ADDR") or "").strip()
+            if dev_addr:
+                device_dev_addrs[name] = dev_addr
             self._device_types_by_name[name] = category
             if physical_hint:
                 device_physical_hints[name] = physical_hint
@@ -148,6 +157,8 @@ class PKTGenerator:
                     link_cfg=link_cfg,
                     device_saverefs=device_saverefs,
                     get_device_type=self._get_device_type,
+                    device_dev_addrs=device_dev_addrs,
+                    port_mem_addrs=port_mem_addrs,
                 )
         created_links = len(links_elem.findall("LINK"))
         if requested_links and created_links == 0:

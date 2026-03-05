@@ -118,7 +118,8 @@ class PhysicalWorkspaceOps:
                     return found
             return None
 
-        pc_parent_node = find_pc_parent(pw) or self._pc_parent_node
+        # Always use parent nodes from the current root tree to avoid cross-tree inserts.
+        pc_parent_node = find_pc_parent(pw)
 
         pw_nodes: dict[str, ET.Element] = {}
         uuid_nodes: dict[str, ET.Element] = {}

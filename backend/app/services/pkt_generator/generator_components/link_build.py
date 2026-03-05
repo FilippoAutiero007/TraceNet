@@ -5,7 +5,7 @@ import logging
 import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
-from app.services.pkt_generator.utils import validate_name
+from app.services.pkt_generator.utils import rand_memaddr, validate_name
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,8 @@ def create_link(
     link_cfg: dict[str, Any],
     device_saverefs: dict[str, str],
     get_device_type: Callable[[str], str],
+    device_dev_addrs: dict[str, str] | None = None,
+    port_mem_addrs: dict[tuple[str, str], str] | None = None,
 ) -> bool:
     if link_template is None:
         logger.warning("No link template available; skipping link %s", link_cfg)
@@ -76,9 +78,39 @@ def create_link(
         to_elem.text = to_saveref
 
     ports = cable.findall("PORT")
+    from_port_name = str(link_cfg.get("from_port", "FastEthernet0/0"))
+    to_port_name = str(link_cfg.get("to_port", "FastEthernet0/0"))
     if len(ports) >= 2:
-        ports[0].text = str(link_cfg.get("from_port", "FastEthernet0/0"))
-        ports[1].text = str(link_cfg.get("to_port", "FastEthernet0/0"))
+        ports[0].text = from_port_name
+        ports[1].text = to_port_name
+
+    # Keep MEM_ADDR fields coherent and non-constant across links.
+    if device_dev_addrs:
+        from_dev_mem = device_dev_addrs.get(from_name)
+        to_dev_mem = device_dev_addrs.get(to_name)
+        if from_dev_mem:
+            elem = cable.find("FROM_DEVICE_MEM_ADDR")
+            if elem is not None:
+                elem.text = from_dev_mem
+        if to_dev_mem:
+            elem = cable.find("TO_DEVICE_MEM_ADDR")
+            if elem is not None:
+                elem.text = to_dev_mem
+
+    if port_mem_addrs is not None:
+        from_key = (from_name, from_port_name)
+        to_key = (to_name, to_port_name)
+        if from_key not in port_mem_addrs:
+            port_mem_addrs[from_key] = rand_memaddr()
+        if to_key not in port_mem_addrs:
+            port_mem_addrs[to_key] = rand_memaddr()
+
+        elem = cable.find("FROM_PORT_MEM_ADDR")
+        if elem is not None:
+            elem.text = port_mem_addrs[from_key]
+        elem = cable.find("TO_PORT_MEM_ADDR")
+        if elem is not None:
+            elem.text = port_mem_addrs[to_key]
 
     type_elem = cable.find("TYPE")
     if type_elem is not None:
