@@ -14,24 +14,9 @@ class PhysicalWorkspaceOps:
         self._pc_parent_node: Optional[ET.Element] = None
 
     def cleanup(self, root: ET.Element) -> None:
-        pw = root.find("PHYSICALWORKSPACE")
-        if pw is None:
-            return
-
-        def remove_device_nodes(parent: ET.Element) -> None:
-            to_remove = []
-            for node in parent.findall("NODE"):
-                ntype = node.find("TYPE")
-                if ntype is not None and ntype.text == "6":
-                    to_remove.append(node)
-            for node in to_remove:
-                parent.remove(node)
-            for node in parent.findall("NODE"):
-                children_node = node.find("CHILDREN")
-                if children_node is not None:
-                    remove_device_nodes(children_node)
-
-        remove_device_nodes(pw)
+        # Keep the template Physical Workspace intact. Device-level reconciliation
+        # is handled by sync() to avoid destructive resets that can corrupt PT files.
+        _ = root
 
     def _extract_base_physical_paths(self) -> dict[str, list[str]]:
         paths: dict[str, list[str]] = {}
@@ -56,6 +41,9 @@ class PhysicalWorkspaceOps:
             if key is None:
                 continue
             paths[key] = [part.strip("{} ") for part in phys_elem.text.split(",") if part.strip()]
+        if "_fallback" not in paths and paths:
+            first_path = next(iter(paths.values()))
+            paths["_fallback"] = first_path
         return paths
 
     def _extract_base_pw_nodes(self) -> dict[str, ET.Element]:
@@ -145,9 +133,14 @@ class PhysicalWorkspaceOps:
         for dev in devices_elem:
             dname = dev.findtext("ENGINE/NAME") or ""
             dtype = (dev.findtext("ENGINE/TYPE") or "").lower()
-            phys_elem = dev.find("WORKSPACE/PHYSICAL")
-            if not dname or phys_elem is None:
+            if not dname:
                 continue
+            workspace = dev.find("WORKSPACE")
+            if workspace is None:
+                workspace = ET.SubElement(dev, "WORKSPACE")
+            phys_elem = workspace.find("PHYSICAL")
+            if phys_elem is None:
+                phys_elem = ET.SubElement(workspace, "PHYSICAL")
             hint = (device_physical_hints or {}).get(dname, {})
 
             if "pc" in dtype or "server" in dtype:
@@ -161,7 +154,11 @@ class PhysicalWorkspaceOps:
 
             hinted_path = hint.get("path_parts") or []
             use_hinted_path = bool(hinted_path) and all(part in uuid_nodes for part in hinted_path[:-1])
-            base_path = hinted_path if use_hinted_path else self._base_physical_paths.get(base_key, [])
+            base_path = (
+                hinted_path
+                if use_hinted_path
+                else self._base_physical_paths.get(base_key, self._base_physical_paths.get("_fallback", []))
+            )
             if not base_path:
                 continue
 
@@ -173,10 +170,20 @@ class PhysicalWorkspaceOps:
             phys_elem.text = ",".join(f"{{{part}}}" for part in (base_path[:-1] + [new_guid]))
 
             pw_node = pw_nodes.get(dname)
+            if pw_node is None and hinted_path:
+                hinted_leaf = hinted_path[-1]
+                pw_node = uuid_nodes.get(hinted_leaf)
+                if pw_node is not None:
+                    name_field = pw_node.find("NAME")
+                    if name_field is None:
+                        name_field = ET.SubElement(pw_node, "NAME")
+                    name_field.text = dname
+                    pw_nodes[dname] = pw_node
+
             if pw_node is None:
                 proto = hint.get("proto_node")
                 if proto is None and self._base_pw_nodes:
-                    proto = self._base_pw_nodes.get(base_key)
+                    proto = self._base_pw_nodes.get(base_key) or self._base_pw_nodes.get("router")
                 if proto is not None:
                     pw_node = copy.deepcopy(proto)
                     name_field = pw_node.find("NAME")
@@ -190,7 +197,7 @@ class PhysicalWorkspaceOps:
                             node
                             for node in siblings.findall("NODE")
                             if (node.findtext("NAME") or "").strip()
-                            and (node.findtext("NAME") or "").lower().startswith(base_key)
+                            and node is not pw_node
                         ]
                         base_x = float(pw_node.findtext("X", default="0"))
                         step_x = 86.0 if base_key == "pc" else 120.0
@@ -205,3 +212,4 @@ class PhysicalWorkspaceOps:
                 if uuid_elem is None:
                     uuid_elem = ET.SubElement(pw_node, "UUID_STR")
                 uuid_elem.text = f"{{{new_guid}}}"
+                uuid_nodes[new_guid] = pw_node

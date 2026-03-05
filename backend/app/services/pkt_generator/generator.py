@@ -16,37 +16,39 @@ logger = logging.getLogger(__name__)
 DEVICE_TEMPLATES = load_device_templates_config()
 _BASE = Path(__file__).resolve().parent.parent.parent.parent
 TEMPLATES_BASE_DIR = _BASE / "templates"
+DEFAULT_LINK_TEMPLATE_XML = """
+<LINK>
+  <TYPE>eCopper</TYPE>
+  <CABLE>
+    <LENGTH>1</LENGTH>
+    <FUNCTIONAL>true</FUNCTIONAL>
+    <FROM>save-ref-id:0</FROM>
+    <PORT>FastEthernet0/0</PORT>
+    <TO>save-ref-id:1</TO>
+    <PORT>FastEthernet0/1</PORT>
+    <FROM_DEVICE_MEM_ADDR>1527445101552</FROM_DEVICE_MEM_ADDR>
+    <TO_DEVICE_MEM_ADDR>1527585720040</TO_DEVICE_MEM_ADDR>
+    <FROM_PORT_MEM_ADDR>1527596954728</FROM_PORT_MEM_ADDR>
+    <TO_PORT_MEM_ADDR>1527593764088</TO_PORT_MEM_ADDR>
+    <GEO_VIEW_COLOR>#6ba72e</GEO_VIEW_COLOR>
+    <IS_MANAGED_IN_RACK_VIEW>false</IS_MANAGED_IN_RACK_VIEW>
+    <TYPE>eStraightThrough</TYPE>
+  </CABLE>
+</LINK>
+""".strip()
 
 
 class PKTGenerator:
     def __init__(self, template_path: str | None = None) -> None:
-        if template_path is None:
-            template_path = str(_BASE / "templates" / "simple_ref.pkt")
-
-        path = Path(template_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Base template not found at {path.absolute()}")
-
-        xml_str = decrypt_pkt_data(path.read_bytes()).decode("utf-8", errors="strict")
-        self.template_root = ET.fromstring(xml_str)
-        template_network = self.template_root.find("NETWORK")
-        if template_network is None:
-            raise ValueError("Invalid template: missing NETWORK node")
-
-        links_node = template_network.find("LINKS")
-        template_links = links_node.findall("LINK") if links_node is not None else []
-        self.link_template: Optional[ET.Element] = template_links[0] if template_links else None
+        # template_path is accepted for backward compatibility but no longer used
+        # as a fixed base reference. The real base template is selected in generate().
+        _ = template_path
+        self.template_root: Optional[ET.Element] = None
+        self.link_template: Optional[ET.Element] = None
         self.catalog = DEVICE_TEMPLATES
-        self._physical_ops = PhysicalWorkspaceOps(self.template_root)
+        self._physical_ops: Optional[PhysicalWorkspaceOps] = None
         self._device_types_by_name: dict[str, str] = {}
-
         self._power_proto: Optional[ET.Element] = None
-        for dev in self.template_root.findall("NETWORK/DEVICES/DEVICE"):
-            name = (dev.findtext("ENGINE/NAME") or "").lower()
-            dtype = (dev.findtext("ENGINE/TYPE") or "").lower()
-            if "power distribution" in name or "power distribution" in dtype:
-                self._power_proto = copy.deepcopy(dev)
-                break
 
     def resolve_device_type(self, device_type: str) -> dict[str, Any]:
         device_key = (device_type or "").strip().lower()
@@ -57,13 +59,41 @@ class PKTGenerator:
             return self.catalog.get("router-2port", self.catalog["router-1port"])
         return self.catalog["pc"]
 
+    def _resolve_template_path_for_device_type(self, device_type: str) -> Path:
+        resolved_meta = self.resolve_device_type(device_type)
+        relative_template = str(resolved_meta.get("template_file", "")).strip()
+        template_path = TEMPLATES_BASE_DIR / relative_template
+        if not template_path.exists():
+            raise FileNotFoundError(f"Device template not found: {template_path}")
+        return template_path
+
+    def _load_template_root_for_device_type(self, device_type: str) -> ET.Element:
+        template_path = self._resolve_template_path_for_device_type(device_type)
+        xml_str = decrypt_pkt_data(template_path.read_bytes()).decode("utf-8", errors="strict")
+        root = ET.fromstring(xml_str)
+        if root.find("NETWORK") is None:
+            raise ValueError(f"Invalid template {template_path}: missing NETWORK")
+        return root
+
+    def _extract_link_template(self, root: ET.Element) -> ET.Element:
+        links = root.findall("NETWORK/LINKS/LINK")
+        if links:
+            return copy.deepcopy(links[0])
+        # Fallback if single-device templates have no LINK prototype.
+        return ET.fromstring(DEFAULT_LINK_TEMPLATE_XML)
+
     def generate(
         self,
         devices_config: list[dict[str, Any]],
         links_config: Optional[list[dict[str, Any]]] = None,
         output_path: str = "output.pkt",
     ) -> str:
-        root = copy.deepcopy(self.template_root)
+        base_type = str(devices_config[0].get("type", "router-1port")) if devices_config else "router-1port"
+        root = self._load_template_root_for_device_type(base_type)
+        self.template_root = root
+        self.link_template = self._extract_link_template(root)
+        self._physical_ops = PhysicalWorkspaceOps(root)
+
         network = root.find("NETWORK")
         if network is None:
             raise ValueError("Template clone error: missing NETWORK")
@@ -73,7 +103,6 @@ class PKTGenerator:
         devices_elem.clear()
         links_elem.clear()
 
-        self._physical_ops.cleanup(root)
         self._device_types_by_name = {}
 
         num_devices = len(devices_config)
@@ -106,7 +135,8 @@ class PKTGenerator:
             if physical_hint:
                 device_physical_hints[name] = physical_hint
 
-        self._physical_ops.sync(root, devices_elem, device_physical_hints=device_physical_hints)
+        if self._physical_ops is not None:
+            self._physical_ops.sync(root, devices_elem, device_physical_hints=device_physical_hints)
 
         requested_links = len(links_config or [])
         if links_config:
@@ -149,20 +179,28 @@ class PKTGenerator:
         return "router"
 
     def _cleanup_physical_workspace(self, root: ET.Element) -> None:
-        self._physical_ops.cleanup(root)
+        if self._physical_ops is not None:
+            self._physical_ops.cleanup(root)
 
     def _sync_physical_workspace(self, root: ET.Element, devices_elem: ET.Element) -> None:
-        self._physical_ops.sync(root, devices_elem)
+        if self._physical_ops is not None:
+            self._physical_ops.sync(root, devices_elem)
 
     def _extract_base_physical_paths(self) -> dict[str, list[str]]:
+        if self._physical_ops is None:
+            return {}
         self._physical_ops._ensure_cache()
         return dict(self._physical_ops._base_physical_paths or {})
 
     def _extract_base_pw_nodes(self) -> dict[str, ET.Element]:
+        if self._physical_ops is None:
+            return {}
         self._physical_ops._ensure_cache()
         return {k: copy.deepcopy(v) for k, v in (self._physical_ops._base_pw_nodes or {}).items()}
 
     def _extract_pc_parent_node(self) -> Optional[ET.Element]:
+        if self._physical_ops is None:
+            return None
         self._physical_ops._ensure_cache()
         parent = self._physical_ops._pc_parent_node
         return copy.deepcopy(parent) if parent is not None else None

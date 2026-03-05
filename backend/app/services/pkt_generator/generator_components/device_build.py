@@ -175,5 +175,10 @@ def build_device(
                     if uuid_text == leaf_uuid:
                         proto_node = copy.deepcopy(node)
                         break
-            physical_hint = {"path_parts": path_parts, "proto_node": proto_node}
+            physical_hint = {
+                "path_parts": path_parts,
+                "proto_node": proto_node,
+                "source_template": str(relative_template),
+                "source_type": resolved_type,
+            }
     return new_device, name, saveref, category, physical_hint
