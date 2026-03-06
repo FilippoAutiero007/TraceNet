@@ -155,3 +155,23 @@ def apply_hierarchical_layout(devices_config: list[dict[str, Any]], links_config
         d["x"] = int(coords_x.get(name, start_x))
         d["y"] = y_levels.get(lvl, 200)
 
+    # 6. Global centering for small standalone LANs
+    if len(levels[0]) == 1 and len(devices_config) <= 8:
+        min_x = min(d["x"] for d in devices_config)
+        max_x = max(d["x"] for d in devices_config)
+        min_y = min(d["y"] for d in devices_config)
+        max_y = max(d["y"] for d in devices_config)
+        
+        target_cx = 400.0
+        target_cy = 300.0
+        
+        current_cx = (min_x + max_x) / 2.0
+        current_cy = (min_y + max_y) / 2.0
+        
+        offset_x = target_cx - current_cx
+        offset_y = target_cy - current_cy
+        
+        for d in devices_config:
+            d["x"] = int(d["x"] + offset_x)
+            d["y"] = int(d["y"] + offset_y)
+

@@ -85,6 +85,16 @@ def test_layout_1r_1s_3h(output_dir):
     pc_center = sum(pc_x_values) / len(pc_x_values)
     
     assert abs(s_x - pc_center) < 10, "PCs should be horizontally centered under their switch"
+    
+    # 3. Verify global bounding box centering for small topologies
+    all_x = [d["x"] for d in coords.values()]
+    all_y = [d["y"] for d in coords.values()]
+    
+    center_x = (min(all_x) + max(all_x)) / 2
+    center_y = (min(all_y) + max(all_y)) / 2
+    
+    assert abs(center_x - 400.0) < 1.0, f"Expected bounding box center_x~400, got {center_x}"
+    assert abs(center_y - 300.0) < 1.0, f"Expected bounding box center_y~300, got {center_y}"
 
 
 def test_layout_1r_2s_3h(output_dir):
