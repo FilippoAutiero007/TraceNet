@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import logging
@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from app.services.pkt_crypto import decrypt_pkt_data, encrypt_pkt_data
 from .generator_components import PhysicalWorkspaceOps, build_device, create_link
 from .utils import ensure_child, load_device_templates_config, rand_saveref, set_text
-
+from .layout import apply_hierarchical_layout
 logger = logging.getLogger(__name__)
 
 DEVICE_TEMPLATES = load_device_templates_config()
@@ -107,6 +107,8 @@ class PKTGenerator:
         links_elem = ensure_child(network, "LINKS")
         devices_elem.clear()
         links_elem.clear()
+
+        apply_hierarchical_layout(devices_config, links_config or [])
 
         self._device_types_by_name = {}
 
