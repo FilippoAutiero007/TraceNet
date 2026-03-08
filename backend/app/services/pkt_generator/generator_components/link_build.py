@@ -5,7 +5,7 @@ import logging
 import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
-from app.services.pkt_generator.utils import rand_memaddr, validate_name
+from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_name
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,9 @@ def create_link(
         logger.error("Template link has no CABLE node!")
         return False
 
-    from_elem = cable.find("FROM")
-    if from_elem is not None:
-        from_elem.text = from_saveref
-
-    to_elem = cable.find("TO")
-    if to_elem is not None:
-        to_elem.text = to_saveref
+    # Never trust stale FROM/TO in template links: force regenerated SAVE_REF_ID values.
+    set_text(cable, "FROM", from_saveref, create=True)
+    set_text(cable, "TO", to_saveref, create=True)
 
     ports = cable.findall("PORT")
     from_port_name = str(link_cfg.get("from_port", "FastEthernet0/0"))

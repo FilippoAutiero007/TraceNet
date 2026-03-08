@@ -102,6 +102,7 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
             "devices": {"routers": request.routers, "switches": request.switches, "pcs": request.pcs},
             "routing_protocol": protocol_value,
             "XML_VERSION": "8.2.2.0400",
+            "topology": request.topology.model_dump() if request.topology else None,
         }
 
         subnets = calculate_vlsm(request.base_network, subnets_input)
@@ -174,6 +175,7 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             "devices": request.devices.model_dump(),
             "routing_protocol": request.routing_protocol.value,
             "XML_VERSION": "8.2.2.0400",
+            "topology": request.topology.model_dump() if request.topology else None,
         }
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")

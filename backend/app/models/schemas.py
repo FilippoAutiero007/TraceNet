@@ -108,6 +108,24 @@ class NormalizedSubnet(BaseModel):
     required_hosts: int = Field(..., ge=1)
 
 
+class TopologyConfig(BaseModel):
+    """Optional topology hints for PKT link generation."""
+    edge_routers: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Routers attached to LAN switches (default: auto)",
+    )
+    backbone_mode: str = Field(default="chain", description="Router backbone strategy: chain or full-mesh")
+
+    @field_validator("backbone_mode")
+    @classmethod
+    def validate_backbone_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"chain", "full-mesh"}:
+            raise ValueError("backbone_mode must be 'chain' or 'full-mesh'")
+        return normalized
+
+
 class NormalizedNetworkRequest(BaseModel):
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
     base_network: str = Field(..., description="Base network in CIDR notation")
@@ -116,6 +134,10 @@ class NormalizedNetworkRequest(BaseModel):
     pcs: int = Field(..., ge=1)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     subnets: List[NormalizedSubnet] = Field(default_factory=list)
+    topology: Optional[TopologyConfig] = Field(
+        default=None,
+        description="Optional topology hints for separating edge and backbone routers",
+    )
 
     @field_validator("base_network")
     @classmethod

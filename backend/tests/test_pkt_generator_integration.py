@@ -85,5 +85,7 @@ def test_save_pkt_file_no_devices(output_dir):
         
     # Should generate empty network (or near empty)
     with open(result["xml_path"], "r") as f:
-        assert "<DEVICES />" in f.read() or "<DEVICES/>" in f.read() or "<DEVICES></DEVICES>" in f.read()
+        content = f.read()
+        import re
+        assert re.search(r"<DEVICES\s*/>", content) or re.search(r"<DEVICES>\s*</DEVICES>", content)
 
