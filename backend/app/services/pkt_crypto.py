@@ -105,7 +105,8 @@ def obf_stage1(data: bytes) -> bytes:
     output = bytearray(L)
     
     for i in range(L):
-        # Key calculation as per pka2xml algorithm
+        # Inverse of deobf_stage1 from reference implementation:
+        # out[L-1-i] = data[i] ^ ((L - i*L) & 0xFF)
         key_byte = (L - i * L) & 0xFF
         val = data[i] ^ key_byte
         
@@ -258,4 +259,5 @@ def validate_encryption(xml_data: bytes) -> Tuple[bool, str]:
             
     except Exception as e:
         return False, f"âŒ Validation failed: {str(e)}"
+
 

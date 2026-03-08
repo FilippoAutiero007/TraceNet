@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -126,18 +126,27 @@ def rand_realistic_mac(device_type: str = "generic") -> str:
       - PC:     0060
       - Server: 00D0
     """
-    oui_map = {
-        "router": ["0001", "0002"],
-        "switch": ["0050"],
-        "pc":     ["0060"],
-        "server": ["00D0"],
+    first_octets_map = {
+        "router": [(0x00, 0x01), (0x00, 0x02)],
+        "switch": [(0x00, 0x50)],
+        "pc":     [(0x00, 0x60)],
+        "server": [(0x00, 0xD0)],
     }
-    oui_pool = oui_map.get(device_type.lower(), ["0060"])  # default: PC-like
-    oui_prefix = secrets.choice(oui_pool)
-    # Generate a pseudo-unique NIC portion while keeping values realistic.
-    nic = f"{secrets.randbelow(0xFFFFFE - 0x170000) + 0x170000:06X}"  # 6 hex digits
-    mac_hex = (oui_prefix + nic).upper()  # 12 hex characters
-    return f"{mac_hex[0:4]}.{mac_hex[4:8]}.{mac_hex[8:12]}"
+    first_two = secrets.choice(first_octets_map.get(device_type.lower(), [(0x00, 0x60)]))
+    mac_bytes = [
+        first_two[0],
+        first_two[1],
+        secrets.randbelow(256),
+        secrets.randbelow(256),
+        secrets.randbelow(256),
+        secrets.randbelow(256),
+    ]
+    # Cisco dotted format: XXXX.XXXX.XXXX (always 12 hex chars)
+    return (
+        f"{mac_bytes[0]:02X}{mac_bytes[1]:02X}."
+        f"{mac_bytes[2]:02X}{mac_bytes[3]:02X}."
+        f"{mac_bytes[4]:02X}{mac_bytes[5]:02X}"
+    )
 
 
 def mac_to_link_local(mac_addr: str) -> str:
@@ -156,7 +165,7 @@ def mac_to_link_local(mac_addr: str) -> str:
     # Flip the U/L bit
     mac_bytes[0] ^= 0x02
     # Insert FF:FE in the middle to form EUI-64
-    eui = mac_bytes[:3] + b"\xff\xfe" + mac_bytes[3:]
+    eui = mac_bytes[:3] + bytearray([0xFF, 0xFE]) + mac_bytes[3:]
     groups = [f"{(eui[i] << 8) | eui[i+1]:04x}" for i in range(0, 8, 2)]
     return "fe80::" + ":".join(groups)
 
@@ -171,3 +180,4 @@ def remove_all_tags(root: ET.Element, tag: str) -> None:
         parent = parent_map.get(node)
         if parent is not None:
             parent.remove(node)
+

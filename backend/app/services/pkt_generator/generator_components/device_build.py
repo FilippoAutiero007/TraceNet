@@ -33,6 +33,16 @@ def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
     set_text(port, "UPMETHOD", "3", create=True)
 
 
+def _ensure_router_running_config(engine: ET.Element) -> None:
+    running = engine.find("RUNNINGCONFIG")
+    if running is None:
+        return
+    if running.findall("LINE"):
+        return
+    line = ET.SubElement(running, "LINE")
+    line.text = "!"
+
+
 def _assign_unique_macs(new_device: ET.Element, used_macs: set[str], device_type: str) -> None:
     def next_unique_mac() -> str:
         for _ in range(2000):
@@ -168,6 +178,8 @@ def build_device(
         _update_device_ip(engine, dev_cfg)
 
     category = (device_meta.get("category") or resolved_type or "").lower()
+    if "router" in category:
+        _ensure_router_running_config(engine)
     physical_hint: Optional[dict[str, Any]] = None
     phys_text = template_device.findtext("WORKSPACE/PHYSICAL")
     if phys_text:

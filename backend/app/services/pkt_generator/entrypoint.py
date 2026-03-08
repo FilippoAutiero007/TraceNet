@@ -37,15 +37,56 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         num_routers = int(device_counts.get("routers", 1))
         num_switches = int(device_counts.get("switches", 1))
         num_pcs = int(device_counts.get("pcs", 0))
+        topology_cfg = config.get("topology", {})
+        if not isinstance(topology_cfg, dict):
+            topology_cfg = {}
+
+        raw_edge_routers = topology_cfg.get("edge_routers", topology_cfg.get("edge_lan_routers"))
+        edge_routers: int | None
+        try:
+            edge_routers = int(raw_edge_routers) if raw_edge_routers is not None else None
+        except (TypeError, ValueError):
+            edge_routers = None
+        backbone_mode = str(topology_cfg.get("backbone_mode", "chain"))
+
+        # Generate links first to determine router port requirements
+        links_config = build_links_config(
+            num_routers, num_switches, num_pcs,
+            edge_routers=edge_routers,
+            backbone_mode=backbone_mode,
+        )
+
+        # Count ports used by each router
+        from collections import defaultdict
+        router_port_count = defaultdict(int)
+        for link in links_config:
+            frm = link.get("from", "")
+            to = link.get("to", "")
+            if frm.startswith("Router"):
+                router_port_count[frm] += 1
+            if to.startswith("Router"):
+                router_port_count[to] += 1
+
+        def _choose_router_type(num_ports: int) -> str:
+            n = max(1, num_ports)
+            if n <= 10:
+                return f"router-{n}port"
+            return "router-10port"
 
         devices_config: list[dict[str, Any]] = []
+        routers_config: list[dict[str, Any]] = []
 
-        # Router: usa di default il modello a 2 porte (id dal JSON)
+        # Router: select model based on required ports
         for i in range(num_routers):
-            devices_config.append({
-                "name": safe_name("Router", i),
-                "type": "router-2port",
-            })
+            router_name = safe_name("Router", i)
+            ports_needed = router_port_count.get(router_name, 1)
+            router_type = _choose_router_type(ports_needed)
+            router_cfg = {
+                "name": router_name,
+                "type": router_type,
+            }
+            devices_config.append(router_cfg)
+            routers_config.append(router_cfg)
 
         # Switch: ad esempio Cisco 2960 a 24 porte (id dal JSON)
         for i in range(num_switches):
@@ -57,7 +98,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         # PC: usa l'id che hai definito nel JSON per gli end device, qui assumo "pc"
         pc_idx = 0
         subnet_allocators: list[dict[str, Any]] = []
-        for subnet in subnets:
+        for subnet_idx, subnet in enumerate(subnets):
             usable_range = getattr(subnet, "usable_range", None)
             if not isinstance(usable_range, list) or len(usable_range) != 2:
                 logger.warning("Invalid usable_range for subnet %s: %r", getattr(subnet, "name", "?"), usable_range)
@@ -74,11 +115,23 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 logger.warning("Empty usable_range for subnet %s: %r", getattr(subnet, "name", "?"), usable_range)
                 continue
 
+            gateway_ip = start_ip
+            if num_routers > 0:
+                router_idx = subnet_idx % num_routers
+                router_cfg = routers_config[router_idx]
+                # Store explicit gateway_ip for downstream consumers and set the router interface IP in PKT.
+                if not router_cfg.get("gateway_ip"):
+                    gateway_str = str(gateway_ip)
+                    router_cfg["gateway_ip"] = gateway_str
+                    router_cfg["ip"] = gateway_str
+                    router_cfg["subnet"] = getattr(subnet, "mask", "255.255.255.0")
+
+            next_ip_for_hosts = ipaddress.ip_address(int(start_ip) + 1)
             subnet_allocators.append(
                 {
                     "name": getattr(subnet, "name", ""),
                     "mask": getattr(subnet, "mask", "255.255.255.0"),
-                    "next_ip": start_ip,
+                    "next_ip": next_ip_for_hosts,
                     "end_ip": end_ip,
                 }
             )
@@ -122,7 +175,6 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 )
                 pc_idx += 1
 
-        links_config = build_links_config(num_routers, num_switches, num_pcs)
         logger.info("Generating %s devices and %s links", len(devices_config), len(links_config))
 
         generator.generate(devices_config, links_config=links_config, output_path=pkt_path)

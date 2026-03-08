@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import uuid
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
@@ -90,139 +89,77 @@ class PhysicalWorkspaceOps:
         if self._pc_parent_node is None:
             self._pc_parent_node = self._extract_pc_parent_node()
 
+    @staticmethod
+    def _extract_uuid_path_from_node(pw_root: ET.Element, leaf_node: ET.Element) -> list[str]:
+        parent_map = {child: parent for parent in pw_root.iter() for child in parent}
+        path: list[str] = []
+        current: Optional[ET.Element] = leaf_node
+        while current is not None:
+            if current.tag == "NODE":
+                uuid_text = (current.findtext("UUID_STR") or "").strip().strip("{}")
+                if uuid_text:
+                    path.append(uuid_text)
+            current = parent_map.get(current)
+        path.reverse()
+        return path
+
     def sync(
         self,
         root: ET.Element,
         devices_elem: ET.Element,
         device_physical_hints: Optional[dict[str, dict[str, Any]]] = None,
     ) -> None:
-        self._ensure_cache()
-        if not self._base_physical_paths:
-            return
+        hints = device_physical_hints or {}
+
         pw = root.find("PHYSICALWORKSPACE")
         if pw is None:
             return
 
-        rack_node: Optional[ET.Element] = None
+        # Build an index of existing PW nodes by UUID to avoid duplicates.
+        uuid_index: dict[str, ET.Element] = {}
         for node in pw.iter("NODE"):
-            if (node.findtext("NAME") or "").strip() == "Rack":
-                rack_node = node
-                break
-
-        def find_pc_parent(node: ET.Element) -> Optional[ET.Element]:
-            for child in list(node):
-                if child.tag == "NODE" and (child.findtext("NAME") or "").strip() == "PC0":
-                    return node
-                found = find_pc_parent(child)
-                if found is not None:
-                    return found
-            return None
-
-        # Always use parent nodes from the current root tree to avoid cross-tree inserts.
-        pc_parent_node = find_pc_parent(pw)
-
-        pw_nodes: dict[str, ET.Element] = {}
-        uuid_nodes: dict[str, ET.Element] = {}
-        claimed_pw_nodes: set[int] = set()
-        for node in pw.iter("NODE"):
-            name = (node.findtext("NAME") or "").strip()
-            if name:
-                pw_nodes[name] = node
-            uuid_text = node.findtext("UUID_STR")
+            uuid_text = (node.findtext("UUID_STR") or "").strip().strip("{}")
             if uuid_text:
-                uuid_nodes[uuid_text.strip("{}")] = node
+                uuid_index[uuid_text] = node
+
+        def parse_path(text: str | None) -> list[str]:
+            if not text:
+                return []
+            return [part.strip("{} ") for part in text.split(",") if part.strip()]
 
         for dev in devices_elem:
             dname = dev.findtext("ENGINE/NAME") or ""
-            dtype = (dev.findtext("ENGINE/TYPE") or "").lower()
             if not dname:
                 continue
-            workspace = dev.find("WORKSPACE")
-            if workspace is None:
-                workspace = ET.SubElement(dev, "WORKSPACE")
-            phys_elem = workspace.find("PHYSICAL")
-            if phys_elem is None:
-                phys_elem = ET.SubElement(workspace, "PHYSICAL")
-            hint = (device_physical_hints or {}).get(dname, {})
 
-            if "pc" in dtype or "server" in dtype:
-                base_key = "pc"
-            elif "switch" in dtype:
-                base_key = "switch"
-            elif "router" in dtype:
-                base_key = "router"
-            else:
+            phys_elem = dev.findtext("WORKSPACE/PHYSICAL") or ""
+            hint = hints.get(dname, {})
+            path_parts = hint.get("path_parts") or parse_path(phys_elem)
+            if not path_parts:
                 continue
 
-            hinted_path = hint.get("path_parts") or []
-            # Use a hinted path only when the full chain (including leaf node) exists
-            # in the current base workspace. Otherwise fall back to a safe base path.
-            use_hinted_path = bool(hinted_path) and all(part in uuid_nodes for part in hinted_path)
-            base_path = (
-                hinted_path
-                if use_hinted_path
-                else self._base_physical_paths.get(base_key, self._base_physical_paths.get("_fallback", []))
-            )
-            if not base_path:
-                continue
+            proto_node = hint.get("proto_node")
 
-            parent_node = uuid_nodes.get(base_path[-2]) if len(base_path) >= 2 else None
-            if parent_node is None:
-                parent_node = pc_parent_node if base_key == "pc" else rack_node
-
-            new_guid = str(uuid.uuid4())
-            phys_elem.text = ",".join(f"{{{part}}}" for part in (base_path[:-1] + [new_guid]))
-
-            pw_node = pw_nodes.get(dname)
-            if pw_node is not None:
-                claimed_pw_nodes.add(id(pw_node))
-            if pw_node is None and hinted_path:
-                hinted_leaf = hinted_path[-1]
-                hinted_candidate = uuid_nodes.get(hinted_leaf)
-                if hinted_candidate is not None and id(hinted_candidate) not in claimed_pw_nodes:
-                    pw_node = hinted_candidate
-                    name_field = pw_node.find("NAME")
-                    if name_field is None:
-                        name_field = ET.SubElement(pw_node, "NAME")
-                    name_field.text = dname
-                    pw_nodes[dname] = pw_node
-                    claimed_pw_nodes.add(id(pw_node))
-
-            if pw_node is None:
-                proto = hint.get("proto_node")
-                if proto is None and self._base_pw_nodes:
-                    proto = self._base_pw_nodes.get(base_key) or self._base_pw_nodes.get("router")
-                if proto is not None:
-                    pw_node = copy.deepcopy(proto)
-                    name_field = pw_node.find("NAME")
-                    if name_field is None:
-                        name_field = ET.SubElement(pw_node, "NAME")
-                    name_field.text = dname
-                    if parent_node is not None:
-                        siblings = parent_node if parent_node.tag == "CHILDREN" else parent_node.find("CHILDREN")
-                        if siblings is None:
-                            siblings = ET.SubElement(parent_node, "CHILDREN")
-                        existing_named = [
-                            node
-                            for node in siblings.findall("NODE")
-                            if (node.findtext("NAME") or "").strip()
-                            and node is not pw_node
-                        ]
-                        base_x = float(pw_node.findtext("X", default="0"))
-                        step_x = 86.0 if base_key == "pc" else 120.0
-                        x_elem = pw_node.find("X")
-                        if x_elem is not None:
-                            x_elem.text = str(base_x + step_x * len(existing_named))
-                        siblings.append(pw_node)
-                        pw_nodes[dname] = pw_node
-                        claimed_pw_nodes.add(id(pw_node))
-
-            if pw_node is not None:
-                stale_uuids = [k for k, v in uuid_nodes.items() if v is pw_node]
-                for stale in stale_uuids:
-                    del uuid_nodes[stale]
-                uuid_elem = pw_node.find("UUID_STR")
-                if uuid_elem is None:
-                    uuid_elem = ET.SubElement(pw_node, "UUID_STR")
-                uuid_elem.text = f"{{{new_guid}}}"
-                uuid_nodes[new_guid] = pw_node
+            parent_node: Optional[ET.Element] = None
+            for idx, part in enumerate(path_parts):
+                node = uuid_index.get(part)
+                if node is None:
+                    if idx == len(path_parts) - 1 and proto_node is not None:
+                        node = copy.deepcopy(proto_node)
+                        name_elem = node.find("NAME") or ET.SubElement(node, "NAME")
+                        name_elem.text = dname
+                        uuid_elem = node.find("UUID_STR") or ET.SubElement(node, "UUID_STR")
+                        uuid_elem.text = f"{{{part}}}"
+                    else:
+                        node = ET.Element("NODE")
+                        uuid_elem = ET.SubElement(node, "UUID_STR")
+                        uuid_elem.text = f"{{{part}}}"
+                    if parent_node is None:
+                        pw.append(node)
+                    else:
+                        children = parent_node.find("CHILDREN")
+                        if children is None:
+                            children = ET.SubElement(parent_node, "CHILDREN")
+                        children.append(node)
+                    uuid_index[part] = node
+                parent_node = node

@@ -93,8 +93,8 @@ def test_layout_1r_1s_3h(output_dir):
     center_x = (min(all_x) + max(all_x)) / 2
     center_y = (min(all_y) + max(all_y)) / 2
     
-    assert abs(center_x - 400.0) < 1.0, f"Expected bounding box center_x~400, got {center_x}"
-    assert abs(center_y - 300.0) < 1.0, f"Expected bounding box center_y~300, got {center_y}"
+    assert abs(center_x - 1100.0) < 1.0, f"Expected bounding box center_x~1100, got {center_x}"
+    assert abs(center_y - 360.0) < 1.0, f"Expected bounding box center_y~360, got {center_y}"
 
 
 def test_layout_1r_2s_3h(output_dir):

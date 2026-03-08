@@ -5,7 +5,7 @@ Bypasses NLP parsing for deterministic, fast generation
 
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from app.models.schemas import RoutingProtocol, DeviceConfig, SubnetRequest
+from app.models.schemas import RoutingProtocol, DeviceConfig, SubnetRequest, TopologyConfig
 
 
 class ManualNetworkRequest(BaseModel):
@@ -30,6 +30,10 @@ class ManualNetworkRequest(BaseModel):
     routing_protocol: RoutingProtocol = Field(
         default=RoutingProtocol.STATIC,
         description="Routing protocol to use"
+    )
+    topology: Optional[TopologyConfig] = Field(
+        default=None,
+        description="Optional topology hints for edge/backbone router links"
     )
 
 
