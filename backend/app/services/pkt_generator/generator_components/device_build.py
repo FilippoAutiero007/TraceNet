@@ -32,15 +32,41 @@ def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
     set_text(port, "POWER", "true", create=True)
     set_text(port, "UPMETHOD", "3", create=True)
 
+    gateway = dev_cfg.get("gateway_ip") or dev_cfg.get("gateway", "")
+    if gateway:
+        set_text(port, "PORT_GATEWAY", str(gateway), create=True)
 
-def _ensure_router_running_config(engine: ET.Element) -> None:
+
+def _ensure_router_running_config(engine: ET.Element, dev_cfg: dict[str, Any] | None = None) -> None:
+    """Scrive la configurazione IOS del router nell'XML."""
     running = engine.find("RUNNINGCONFIG")
     if running is None:
         return
-    if running.findall("LINE"):
-        return
-    line = ET.SubElement(running, "LINE")
-    line.text = "!"
+
+    # Pulisce le linee esistenti
+    for line in running.findall("LINE"):
+        running.remove(line)
+
+    # Costruisce i comandi IOS
+    ip = dev_cfg.get("ip", "") if dev_cfg else ""
+    subnet = dev_cfg.get("subnet", "") if dev_cfg else ""
+    
+    commands = []
+    if ip and subnet:
+        commands = [
+            "!",
+            "interface FastEthernet0/0",
+            f" ip address {ip} {subnet}",
+            " no shutdown",
+            "!",
+            "end",
+        ]
+    else:
+        commands = ["!", "end"]
+
+    for cmd in commands:
+        line = ET.SubElement(running, "LINE")
+        line.text = cmd
 
 
 def _assign_unique_macs(new_device: ET.Element, used_macs: set[str], device_type: str) -> None:
@@ -179,7 +205,7 @@ def build_device(
 
     category = (device_meta.get("category") or resolved_type or "").lower()
     if "router" in category:
-        _ensure_router_running_config(engine)
+        _ensure_router_running_config(engine, dev_cfg)
     physical_hint: Optional[dict[str, Any]] = None
     phys_text = template_device.findtext("WORKSPACE/PHYSICAL")
     if phys_text:

@@ -49,7 +49,10 @@ def calculate_device_coordinates(
     return (default_x + x_offset, default_y + y_offset)
 
 
-def apply_hierarchical_layout(devices_config: list[dict[str, Any]], links_config: list[dict[str, Any]]) -> None:
+def apply_hierarchical_layout(
+    devices_config: list[dict[str, Any]],
+    links_config: list[dict[str, Any]],
+) -> None:
     """Assign X/Y coordinates to devices using scenario-based layout rules."""
     if not devices_config:
         return
@@ -68,22 +71,43 @@ def apply_hierarchical_layout(devices_config: list[dict[str, Any]], links_config
     pos: dict[str, tuple[float, float]] = {}
 
     if scenario == "lan_with_services_layers":
-        layout_lan_with_services_layers(pos, routers, firewalls, servers, switches, endpoints, adjacency, params)
+        layout_lan_with_services_layers(
+            pos,
+            routers,
+            firewalls,
+            servers,
+            switches,
+            endpoints,
+            adjacency,
+            params,
+        )
     elif scenario == "one_switch_multiple_vlan":
-        layout_one_switch_multiple_vlan(pos, routers, switches, endpoints, device_map, params)
+        layout_one_switch_multiple_vlan(
+            pos,
+            routers,
+            switches,
+            endpoints,
+            device_map,
+            params,
+        )
     else:
         layout_fn = get_layout_dispatcher().get(scenario)
         if layout_fn is None:
             layout_fn = get_layout_dispatcher()["generic_hierarchical"]
         layout_fn(pos, routers, switches, endpoints, adjacency, params)
 
-    resolve_overlaps(pos)
-    center_layout(pos, params)
+    # Per gli scenari generici manteniamo la vecchia logica di overlap+centering
+    if scenario not in ("lan_with_services_layers", "one_switch_multiple_vlan"):
+        resolve_overlaps(pos)
+        center_layout(pos, params)
 
     fallback_x, fallback_y = params.base_x, params.base_y + 2 * params.dy_layer
     for idx, device in enumerate(devices_config):
         name = device.get("name", "")
-        x, y = pos.get(name, (fallback_x + idx * 40, fallback_y + (idx % 2) * 30))
+        x, y = pos.get(
+            name,
+            (fallback_x + idx * 40, fallback_y + (idx % 2) * 30),
+        )
         device["x"] = int(round(x))
         device["y"] = int(round(y))
 

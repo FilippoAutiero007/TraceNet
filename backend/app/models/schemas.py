@@ -116,6 +116,7 @@ class TopologyConfig(BaseModel):
         description="Routers attached to LAN switches (default: auto)",
     )
     backbone_mode: str = Field(default="chain", description="Router backbone strategy: chain or full-mesh")
+    gateway_position: str = Field(default="first", description="Gateway position: 'first' (default) or 'last'")
 
     @field_validator("backbone_mode")
     @classmethod
@@ -124,6 +125,15 @@ class TopologyConfig(BaseModel):
         if normalized not in {"chain", "full-mesh"}:
             raise ValueError("backbone_mode must be 'chain' or 'full-mesh'")
         return normalized
+
+    @field_validator("gateway_position")
+    @classmethod
+    def validate_gateway_position(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"first", "last"}:
+            raise ValueError("gateway_position must be 'first' or 'last'")
+        return normalized
+
 
 
 class NormalizedNetworkRequest(BaseModel):  

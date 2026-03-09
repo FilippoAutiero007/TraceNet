@@ -117,7 +117,15 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 logger.warning("Empty usable_range for subnet %s: %r", getattr(subnet, "name", "?"), usable_range)
                 continue
 
-            gateway_ip = start_ip
+            # Gateway: primo IP (default) o ultimo IP (se richiesto)
+            gateway_position = topology_cfg.get("gateway_position", "first")
+            if gateway_position == "last":
+                gateway_ip = end_ip
+            else:
+                # Usa il gateway calcolato dal VLSM se disponibile
+                vlsm_gw = getattr(subnet, "gateway", None)
+                gateway_ip = ipaddress.ip_address(vlsm_gw) if vlsm_gw else start_ip
+
             if num_routers > 0:
                 router_idx = subnet_idx % num_routers
                 router_cfg = routers_config[router_idx]
@@ -128,13 +136,14 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     router_cfg["ip"] = gateway_str
                     router_cfg["subnet"] = getattr(subnet, "mask", "255.255.255.0")
 
-            next_ip_for_hosts = ipaddress.ip_address(int(start_ip) + 1)
+            next_ip_for_hosts = start_ip  # start_ip = 192.168.1.2, gateway = 192.168.1.1 (già riservato dal VLSM)
             subnet_allocators.append(
                 {
                     "name": getattr(subnet, "name", ""),
                     "mask": getattr(subnet, "mask", "255.255.255.0"),
                     "next_ip": next_ip_for_hosts,
                     "end_ip": end_ip,
+                    "gateway": str(gateway_ip),
                 }
             )
 
@@ -154,6 +163,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                         "type": "pc",
                         "ip": ip,
                         "subnet": alloc["mask"],
+                        "gateway_ip": alloc.get("gateway", ""),
                     }
                 )
                 pc_idx += 1
