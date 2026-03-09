@@ -36,7 +36,7 @@ class DeviceConfig(BaseModel):
     routers: int = Field(default=1, ge=1, le=5)
     switches: int = Field(default=1, ge=0, le=10)
     pcs: int = Field(default=1, ge=1, le=100)
-
+    servers: int = Field(default=0, ge=0)  
 
 
 class NetworkConfig(BaseModel):
@@ -126,12 +126,13 @@ class TopologyConfig(BaseModel):
         return normalized
 
 
-class NormalizedNetworkRequest(BaseModel):
+class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
     base_network: str = Field(..., description="Base network in CIDR notation")
     routers: int = Field(..., ge=1)
     switches: int = Field(..., ge=0)
     pcs: int = Field(..., ge=1)
+    servers: int = Field(default=0, ge=0)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     subnets: List[NormalizedSubnet] = Field(default_factory=list)
     topology: Optional[TopologyConfig] = Field(

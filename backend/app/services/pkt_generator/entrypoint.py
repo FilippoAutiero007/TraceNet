@@ -37,6 +37,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         num_routers = int(device_counts.get("routers", 1))
         num_switches = int(device_counts.get("switches", 1))
         num_pcs = int(device_counts.get("pcs", 0))
+        num_servers = int(device_counts.get("servers", 0))
         topology_cfg = config.get("topology", {})
         if not isinstance(topology_cfg, dict):
             topology_cfg = {}
@@ -52,6 +53,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         # Generate links first to determine router port requirements
         links_config = build_links_config(
             num_routers, num_switches, num_pcs,
+            num_servers=num_servers,
             edge_routers=edge_routers,
             backbone_mode=backbone_mode,
         )
@@ -174,6 +176,11 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     }
                 )
                 pc_idx += 1
+        for i in range(num_servers):
+            devices_config.append({
+                "name": safe_name("Server", i),
+                "type": "server",
+            })
 
         logger.info("Generating %s devices and %s links", len(devices_config), len(links_config))
 

@@ -98,10 +98,24 @@ def layout_single_small_lan_center(
     params: LayoutParams,
 ) -> None:
     set_row(pos, routers, params.base_x, params.base_y, params.dx_router)
-    switch_y = params.base_y + params.dy_layer
+    switch_y = params.base_y + params.dy_layer + 50
     set_row(pos, switches, params.base_x, switch_y, params.dx_switch)
-    grouped = hosts_by_parent(endpoints, switches, adjacency)
+
+    # Separa server da PC tra gli endpoint
+    servers = [n for n in endpoints if "server" in n.lower()]
+    pcs = [n for n in endpoints if n not in servers]
+
+    # PC sotto gli switch
+    grouped = hosts_by_parent(pcs, switches, adjacency)
     assign_hosts_under_switches(pos, grouped, switch_y, params)
+
+    # Server a destra, stessa Y dei PC
+    pc_y = switch_y + params.dy_layer
+    for idx, srv in enumerate(servers):
+        pos[srv] = (
+            params.base_x + params.dx_switch + (idx + 1) * (params.dx_host + 20),
+            pc_y,
+        )
 
 
 def layout_one_router_multiple_lans_same_band(
@@ -316,9 +330,22 @@ def layout_lan_with_services_layers(
     internal_servers = [s for s in servers if s not in dmz_servers]
     set_row(pos, dmz_servers, params.base_x, params.base_y + params.dy_layer + 90, params.dx_host)
 
-    switch_y = params.base_y + 2 * params.dy_layer + 40
+    # Switch più vicino al router se non ci sono firewall
+    switch_gap = params.dy_layer if firewalls else params.dy_layer // 2
+    switch_y = params.base_y + switch_gap + 40
     set_row(pos, switches, params.base_x, switch_y, params.dx_switch)
-    set_row(pos, internal_servers, params.base_x, switch_y + 95, params.dx_host)
+
+    # Server interni a fianco dei PC, vicino allo switch
+    if switches:
+        sw_x, _ = pos.get(switches[0], (params.base_x, switch_y))
+    else:
+        sw_x = params.base_x
+    for idx, srv in enumerate(internal_servers):
+        pos[srv] = (
+            sw_x + params.dx_host * (idx + 1),
+            switch_y + params.dy_layer,
+        )
+
 
     grouped = hosts_by_parent([h for h in endpoints if h not in servers], switches, adjacency)
     assign_hosts_under_switches(pos, grouped, switch_y, params)

@@ -204,54 +204,43 @@ class PKTGenerator:
         if requested_links and created_links == 0:
             logger.warning("Requested %s links but generated 0 valid LINK nodes", requested_links)
         # ── PHYSICALWORKSPACE ──────────────────────────────────────────
-        # Create unique physical nodes for each device to avoid conflicts.
-        pw = root.find("PHYSICALWORKSPACE")
-        if pw is not None:
-            rack_node = pw.find(".//NODE[UUID_STR='{3c62e9ba-4250-4543-8361-a3e10dbc57c1}']")
-            if rack_node is not None:
-                # Get the base path from the rack up to the root
-                parent_map = {c: p for p in pw.iter() for c in p}
-                
-                def get_path_to_node(node):
-                    path = []
-                    curr = node
-                    while curr in parent_map:
-                        path.insert(0, curr)
-                        curr = parent_map[curr]
-                    if path:
-                        path.insert(0, curr) # add root
-                    return path
+        # Usa i path fisici di simple_ref.pkt per tutti i device.
+        _simple_xml = decrypt_pkt_data(SIMPLE_REF_PATH.read_bytes()).decode("utf-8", errors="strict")
+        _simple_root = ET.fromstring(_simple_xml)
+        _tpl_physical: dict[str, str] = {}
+        _tpl_cpur: dict[str, Optional[ET.Element]] = {}
+        for _dev in _simple_root.findall(".//NETWORK/DEVICES/DEVICE"):
+            _dtype = (_dev.findtext("ENGINE/TYPE") or "").strip().lower()
+            _phys = _dev.findtext("WORKSPACE/PHYSICAL") or ""
+            _cpur = _dev.find("WORKSPACE/PHYSICAL_CPUR")
+            if _phys and _dtype not in _tpl_physical:
+                _tpl_physical[_dtype] = _phys
+                _tpl_cpur[_dtype] = copy.deepcopy(_cpur) if _cpur is not None else None
 
-                rack_path_nodes = get_path_to_node(rack_node)
-                rack_path_uuids = [n.findtext('UUID_STR') for n in rack_path_nodes if n.findtext('UUID_STR')]
-
-                for device_element in devices_elem.findall("DEVICE"):
-                    import uuid
-                    new_uuid = str(uuid.uuid4())
-                    
-                    # Create a new NODE for the device
-                    new_node = ET.Element("NODE")
-                    set_text(new_node, "TYPE", "6")
-                    set_text(new_node, "NAME", device_element.findtext("ENGINE/NAME"))
-                    set_text(new_node, "UUID_STR", f"{{{new_uuid}}}")
-                    # Add other necessary fields for a device node if any
-                    set_text(new_node, "X", "0")
-                    set_text(new_node, "Y", "0")
-                    set_text(new_node, "SX", "1")
-                    set_text(new_node, "SY", "1")
-
-                    children = rack_node.find("CHILDREN")
-                    if children is None:
-                        children = ET.SubElement(rack_node, "CHILDREN")
-                    children.append(new_node)
-                    
-                    # Construct the full physical path
-                    full_path_uuids = rack_path_uuids + [f'{{{new_uuid}}}']
-                    physical_path_str = ",".join(full_path_uuids)
-
-                    ws = device_element.find("WORKSPACE")
-                    if ws is not None:
-                        set_text(ws, "PHYSICAL", physical_path_str)
+        for _device in devices_elem.findall("DEVICE"):
+            _dtype = (_device.findtext("ENGINE/TYPE") or "").strip().lower()
+            _ws = _device.find("WORKSPACE")
+            if _ws is None:
+                continue
+            # Server usa il path fisico del PC
+            if _dtype == "server":
+                _path = _tpl_physical.get("pc") or _tpl_physical.get("router", "")
+                _cpur_tpl = _tpl_cpur.get("pc") or _tpl_cpur.get("router")
+            else:
+                _path = _tpl_physical.get(_dtype) or _tpl_physical.get("router", "")
+                _cpur_tpl = _tpl_cpur.get(_dtype) or _tpl_cpur.get("router")
+            if _path:
+                _phys_elem = _ws.find("PHYSICAL")
+                if _phys_elem is not None:
+                    _phys_elem.text = _path
+                else:
+                    ET.SubElement(_ws, "PHYSICAL").text = _path
+            if _cpur_tpl is not None:
+                _old_cpur = _ws.find("PHYSICAL_CPUR")
+                if _old_cpur is not None:
+                    _idx = list(_ws).index(_old_cpur)
+                    _ws.remove(_old_cpur)
+                    _ws.insert(_idx, copy.deepcopy(_cpur_tpl))
 
         # Serializza e correggi self-closing tags (PT non li accetta)
         xml_str = ET.tostring(root, encoding="unicode", method="xml")

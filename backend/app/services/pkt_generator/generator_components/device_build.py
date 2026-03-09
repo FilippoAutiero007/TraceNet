@@ -103,7 +103,7 @@ def build_device(
         resolved_type = "router-1port"
         device_meta = device_templates[resolved_type]
 
-    relative_template = device_meta["template_file"]
+    relative_template = device_meta.get("template_file") or device_meta.get("base_template", "")
     template_path = templates_base_dir / relative_template
     if not template_path.exists():
         # Backward-compatible alias for historical catalog typo.
@@ -115,7 +115,7 @@ def build_device(
     if not template_path.exists() and resolved_type != "router-1port":
         resolved_type = "router-1port"
         device_meta = device_templates[resolved_type]
-        relative_template = device_meta["template_file"]
+        relative_template = device_meta.get("template_file") or device_meta.get("base_template", "")
         template_path = templates_base_dir / relative_template
 
     if not template_path.exists():
