@@ -5,7 +5,7 @@ Pydantic models for NetTrace API
 import re
 import ipaddress
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -135,6 +135,39 @@ class TopologyConfig(BaseModel):
         return normalized
 
 
+class VlanConfig(BaseModel):
+    """Optional VLAN configuration for switches/router-on-a-stick (best-effort schema)."""
+    id: int = Field(..., ge=1, le=4094, description="VLAN ID")
+    name: Optional[str] = Field(default=None, description="VLAN name")
+
+    model_config = ConfigDict(extra="allow")
+
+
+class NatConfig(BaseModel):
+    """Optional NAT configuration (best-effort schema)."""
+    type: Literal["static", "dynamic", "pool", "pat", "overload"] = Field(..., description="NAT type")
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AclRule(BaseModel):
+    """Optional ACL rule entry (best-effort schema)."""
+    action: Optional[str] = None
+    line: Optional[str] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AclConfig(BaseModel):
+    """Optional ACL definition (best-effort schema)."""
+    type: Literal["standard", "extended"] = Field(..., description="ACL type")
+    id: Optional[str] = Field(default=None, description="Standard ACL number (e.g. '10')")
+    name: Optional[str] = Field(default=None, description="Extended ACL name (e.g. 'BLOCK_WEB')")
+    rules: List[AclRule] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
 
 class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
@@ -144,6 +177,11 @@ class NormalizedNetworkRequest(BaseModel):
     pcs: int = Field(..., ge=1)
     servers: int = Field(default=0, ge=0)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
+    dhcp_from_router: bool = Field(default=False, description="Enable IOS DHCP pools on routers and set PCs as DHCP clients")
+    server_services: List[str] = Field(default_factory=list, description="Services to enable on Server-PT (Packet Tracer XML)")
+    vlans: List[VlanConfig] = Field(default_factory=list, description="VLAN definitions for switches")
+    nat: Optional[NatConfig] = Field(default=None, description="NAT configuration for routers")
+    acl: List[AclConfig] = Field(default_factory=list, description="ACL configurations for routers")
     subnets: List[NormalizedSubnet] = Field(default_factory=list)
     topology: Optional[TopologyConfig] = Field(
         default=None,
@@ -166,6 +204,10 @@ class NormalizedNetworkRequest(BaseModel):
         if protocol not in allowed_protocols:
             raise ValueError(f"routing_protocol must be one of {sorted(allowed_protocols)}")
         self.routing_protocol = protocol
+
+        # Normalize service names for downstream code (entrypoint/config_generator).
+        if self.server_services:
+            self.server_services = [str(s).strip().lower() for s in self.server_services if str(s).strip()]
 
         if self.subnets:
             total_subnet_hosts = sum(subnet.required_hosts for subnet in self.subnets)

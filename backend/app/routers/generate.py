@@ -101,6 +101,11 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
             "subnets": [s.model_dump() for s in subnets_input],
             "devices": {"routers": request.routers, "switches": request.switches, "pcs": request.pcs, "servers": getattr(request, "servers", 0)},
             "routing_protocol": protocol_value,
+            "dhcp_from_router": getattr(request, "dhcp_from_router", False),
+            "server_services": getattr(request, "server_services", []) or [],
+            "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
+            "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
+            "acl": [a.model_dump() for a in getattr(request, "acl", []) or []],
             "XML_VERSION": "8.2.2.0400",
             "topology": request.topology.model_dump() if request.topology else None,
         }
