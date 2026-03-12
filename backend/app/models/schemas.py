@@ -168,6 +168,11 @@ class AclConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ServerConfig(BaseModel):
+    services: List[str] = Field(default_factory=list)
+    hostname: str = Field(default="")
+
+
 
 class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
@@ -179,6 +184,7 @@ class NormalizedNetworkRequest(BaseModel):
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     dhcp_from_router: bool = Field(default=False, description="Enable IOS DHCP pools on routers and set PCs as DHCP clients")
     server_services: List[str] = Field(default_factory=list, description="Services to enable on Server-PT (Packet Tracer XML)")
+    servers_config: List[ServerConfig] = Field(default_factory=list)
     vlans: List[VlanConfig] = Field(default_factory=list, description="VLAN definitions for switches")
     nat: Optional[NatConfig] = Field(default=None, description="NAT configuration for routers")
     acl: List[AclConfig] = Field(default_factory=list, description="ACL configurations for routers")
@@ -208,6 +214,12 @@ class NormalizedNetworkRequest(BaseModel):
         # Normalize service names for downstream code (entrypoint/config_generator).
         if self.server_services:
             self.server_services = [str(s).strip().lower() for s in self.server_services if str(s).strip()]
+
+        if self.servers_config:
+            for srv in self.servers_config:
+                if srv.services:
+                    srv.services = [str(s).strip().lower() for s in srv.services if str(s).strip()]
+                srv.hostname = str(srv.hostname or "").strip()
 
         if self.subnets:
             total_subnet_hosts = sum(subnet.required_hosts for subnet in self.subnets)

@@ -13,6 +13,7 @@ from app.services.pkt_generator.config_generator import (
     generate_server_config,
     generate_switch_config,
 )
+from app.services.pkt_generator.server_config import write_dns_records
 from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_name, rand_saveref
 
 
@@ -117,16 +118,8 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
     dns = engine.find("DNS_SERVER")
     if dns is not None and "dns" in cfg:
         set_text(dns, "ENABLED", "1" if cfg["dns"] else "0", create=True)
-        # Minimal A record for the server itself (optional, harmless).
-        if cfg["dns"] and dev_cfg.get("ip"):
-            db = dns.find("NAMESERVER-DATABASE")
-            if db is None:
-                db = ET.SubElement(dns, "NAMESERVER-DATABASE")
-            db.clear()
-            rr = ET.SubElement(db, "RR")
-            set_text(rr, "TYPE", "A", create=True)
-            set_text(rr, "NAME", str(dev_cfg.get("name", "server")).lower(), create=True)
-            set_text(rr, "IP", str(dev_cfg.get("ip")), create=True)
+        if cfg["dns"]:
+            write_dns_records(engine, dev_cfg)
 
     # DHCP server (server-side), bind to FastEthernet0 pool if present in template.
     if "dhcp" in cfg:

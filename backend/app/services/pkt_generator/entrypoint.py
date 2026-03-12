@@ -15,6 +15,7 @@ from .template import get_pkt_generator, get_template_path
 from .topology import build_links_config
 from .utils import safe_name
 from .config_generator import calculate_static_routes
+from .server_config import build_server_configs
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,9 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         routing_protocol = str(config.get("routing_protocol", "static")).strip()
         dhcp_from_router = bool(config.get("dhcp_from_router", False))
         server_services = list(config.get("server_services") or [])
+        servers_config_list = config.get("servers_config") or []
+        if not isinstance(servers_config_list, list):
+            servers_config_list = []
         vlans_global = list(config.get("vlans") or [])
         nat_global = config.get("nat")
         acl_global = list(config.get("acl") or [])
@@ -267,6 +271,13 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     srv_cfg.update({"ip": ip, "subnet": seg["mask"], "gateway_ip": seg["gateway"]})
             devices_config.append(srv_cfg)
 
+        build_server_configs(
+            num_servers=num_servers,
+            servers_config_list=servers_config_list,
+            server_services_global=server_services,
+            devices_config=devices_config,
+        )
+
         pc_idx = 0
         while pc_idx < num_pcs:
             name = safe_name("PC", pc_idx)
@@ -326,11 +337,15 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
 
         # 5) Router DHCP DNS option: prefer the first server IP if DNS is enabled there.
         dns_ip: str | None = None
-        if server_services and any(str(s).lower() == "dns" for s in server_services):
-            for d in devices_config:
-                if str(d.get("type", "")).lower() == "server" and d.get("ip"):
-                    dns_ip = str(d["ip"])
-                    break
+        for d in devices_config:
+            if str(d.get("type", "")).lower() != "server":
+                continue
+            services = {str(s).strip().lower() for s in (d.get("server_services") or [])}
+            if "dns" not in services:
+                continue
+            if d.get("ip"):
+                dns_ip = str(d["ip"])
+                break
         if dns_ip and dhcp_from_router:
             for r in routers_config:
                 r["dhcp_dns"] = dns_ip

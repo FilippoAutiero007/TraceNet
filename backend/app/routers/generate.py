@@ -103,6 +103,7 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
             "routing_protocol": protocol_value,
             "dhcp_from_router": getattr(request, "dhcp_from_router", False),
             "server_services": getattr(request, "server_services", []) or [],
+            "servers_config": [s.model_dump() for s in request.servers_config] if request.servers_config else [],
             "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
             "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
             "acl": [a.model_dump() for a in getattr(request, "acl", []) or []],
