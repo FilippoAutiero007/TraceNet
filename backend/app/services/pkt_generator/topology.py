@@ -9,6 +9,7 @@ def build_links_config(
     num_switches: int,
     num_pcs: int,
     *,
+    num_servers: int = 0,
     edge_routers: int | None = None,
     backbone_mode: str = "chain",
 ) -> list[dict[str, str]]:
@@ -105,6 +106,17 @@ def build_links_config(
                 "from": safe_name("Switch", switch_idx),
                 "from_port": f"FastEthernet0/{port_num}",
                 "to": safe_name("PC", pc_idx),
+                "to_port": "FastEthernet0",
+            })
+                # Link switch → server
+    if num_switches > 0:
+        for srv_idx in range(num_servers):
+            switch_idx = srv_idx % num_switches
+            port_num = (num_pcs + srv_idx) // num_switches + 2
+            links_config.append({
+                "from": safe_name("Switch", switch_idx),
+                "from_port": f"FastEthernet0/{port_num}",
+                "to": safe_name("Server", srv_idx),
                 "to_port": "FastEthernet0",
             })
 
