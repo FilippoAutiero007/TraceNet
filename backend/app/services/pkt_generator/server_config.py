@@ -140,5 +140,101 @@ def write_dns_records(engine: ET.Element, dev_cfg: dict) -> None:
         ET.SubElement(rr, "NAME").text = name
         ET.SubElement(rr, "TTL").text = "86400"
         ET.SubElement(rr, "IPADDRESS").text = ip
+def write_dhcp_config(engine: ET.Element, dev_cfg: dict) -> None:
+    """
+    Configura il DHCP server nel tag ENGINE/DHCP_SERVERS del server PT.
+    
+    Struttura XML attesa da PT 8.2.2 (verificata):
+    <DHCP_SERVERS>
+      <ASSOCIATED_PORTS>
+        <ASSOCIATED_PORT>
+          <NAME>FastEthernet0</NAME>
+          <DHCP_SERVER>
+            <ENABLED>1</ENABLED>
+            <POOLS>
+              <POOL>
+                <NAME>serverPool</NAME>
+                <NETWORK>192.168.1.0</NETWORK>
+                <MASK>255.255.255.192</MASK>
+                <DEFAULT_ROUTER>192.168.1.1</DEFAULT_ROUTER>
+                <START_IP>192.168.1.6</START_IP>
+                <END_IP>192.168.1.62</END_IP>
+                <DNS_SERVER>192.168.1.2</DNS_SERVER>
+                <MAX_USERS>512</MAX_USERS>
+                <LEASE_TIME>86400000</LEASE_TIME>
+                <TFTP_ADDRESS>0.0.0.0</TFTP_ADDRESS>
+                <WLC_ADDRESS>0.0.0.0</WLC_ADDRESS>
+                <DOMAIN_NAME></DOMAIN_NAME>
+                <DHCP_POOL_LEASES />
+              </POOL>
+            </POOLS>
+            <DHCP_RESERVATIONS />
+            <AUTOCONFIG />
+          </DHCP_SERVER>
+        </ASSOCIATED_PORT>
+      </ASSOCIATED_PORTS>
+    </DHCP_SERVERS>
+    """
+    import ipaddress
+
+    dhcp_servers = engine.find("DHCP_SERVERS")
+    if dhcp_servers is None:
+        return
+
+    # Calcola i parametri del pool dalla subnet del server
+    gateway = str(dev_cfg.get("gateway_ip", "0.0.0.0")).strip()
+    mask = str(dev_cfg.get("subnet", "255.255.255.0")).strip()
+    server_ip = str(dev_cfg.get("ip", "0.0.0.0")).strip()
+    dns_ip = dev_cfg.get("dhcp_dns", server_ip)  # usa il server stesso come DNS default
+
+    try:
+        net = ipaddress.IPv4Network(f"{gateway}/{mask}", strict=False)
+        hosts = list(net.hosts())
+        # Riserva i primi 5 IP (gateway, server, ecc.)
+        start_ip = str(hosts[5]) if len(hosts) > 5 else str(hosts[0])
+        end_ip = str(hosts[-1])
+        network_addr = str(net.network_address)
+    except Exception:
+        network_addr = "0.0.0.0"
+        start_ip = "0.0.0.0"
+        end_ip = "0.0.0.0"
+
+    for ap in dhcp_servers.findall("ASSOCIATED_PORTS/ASSOCIATED_PORT"):
+        dhcp_server = ap.find("DHCP_SERVER")
+        if dhcp_server is None:
+            continue
+        
+        # Abilita DHCP
+        enabled = dhcp_server.find("ENABLED")
+        if enabled is None:
+            enabled = ET.SubElement(dhcp_server, "ENABLED")
+        enabled.text = "1"
+
+        pools = dhcp_server.find("POOLS")
+        if pools is None:
+            continue
+        pool = pools.find("POOL")
+        if pool is None:
+            pool = ET.SubElement(pools, "POOL")
+
+        def _st(tag, val):
+            elem = pool.find(tag)
+            if elem is None:
+                elem = ET.SubElement(pool, tag)
+            elem.text = val
+
+        _st("NAME", "serverPool")
+        _st("NETWORK", network_addr)
+        _st("MASK", mask)
+        _st("DEFAULT_ROUTER", gateway)
+        _st("TFTP_ADDRESS", "0.0.0.0")
+        _st("START_IP", start_ip)
+        _st("END_IP", end_ip)
+        _st("DNS_SERVER", str(dns_ip))
+        _st("MAX_USERS", "512")
+        _st("LEASE_TIME", "86400000")
+        _st("WLC_ADDRESS", "0.0.0.0")
+        _st("DOMAIN_NAME", "")
+
 
 

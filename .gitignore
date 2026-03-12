@@ -63,3 +63,6 @@ nettrace/build/
 # Backend specific
 backend/.env*
 backend/test_output*/
+
+.venv-linux/
+
