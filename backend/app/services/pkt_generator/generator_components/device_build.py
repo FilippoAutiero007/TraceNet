@@ -18,40 +18,71 @@ from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_na
 
 
 def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
+    """Scrive gli IP di tutte le interfacce configurate nei rispettivi slot."""
     module = engine.find("MODULE")
     if module is None:
         return
-
     slots = module.findall("SLOT")
     if not slots:
         return
 
-    slot_module = slots[0].find("MODULE")
-    if slot_module is None:
-        return
+    # Mappa nome interfaccia -> slot index
+    # FastEthernet0/0 -> slot 0, FastEthernet1/0 -> slot 1, ecc.
+    def slot_index_for_port(port_name: str) -> int:
+        import re
+        m = re.match(r"FastEthernet(\d+)/", port_name or "")
+        if m:
+            return int(m.group(1))
+        m = re.match(r"GigabitEthernet(\d+)/", port_name or "")
+        if m:
+            return int(m.group(1))
+        return 0
 
-    port = slot_module.find("PORT")
-    if port is None:
-        return
+    interfaces = dev_cfg.get("interfaces", [])
 
-    wants_dhcp = bool(dev_cfg.get("dhcp_client"))
-    if wants_dhcp:
-        # Packet Tracer EndDevices use these tags for IPv4 addressing.
-        set_text(port, "IP", "", create=True)
-        set_text(port, "SUBNET", "", create=True)
-        set_text(port, "PORT_GATEWAY", "", create=True)
-        set_text(port, "PORT_DHCP_ENABLE", "true", create=True)
+    if interfaces:
+        # Scrivi ogni interfaccia nel suo slot corretto
+        for iface in interfaces:
+            port_name = str(iface.get("name", "")).strip()
+            ip = str(iface.get("ip", "")).strip()
+            mask = str(iface.get("mask", "255.255.255.0")).strip()
+            if not ip:
+                continue
+            idx = slot_index_for_port(port_name)
+            if idx >= len(slots):
+                continue
+            slot_module = slots[idx].find("MODULE")
+            if slot_module is None:
+                continue
+            port = slot_module.find("PORT")
+            if port is None:
+                continue
+            set_text(port, "IP", ip, create=True)
+            set_text(port, "SUBNET", mask, create=True)
+            set_text(port, "POWER", "true", create=True)
+            set_text(port, "UP_METHOD", "3", create=True)
+            gateway = iface.get("gateway_ip") or dev_cfg.get("gateway_ip", "")
+            if gateway and str(iface.get("role","")) == "lan":
+                set_text(port, "PORT_GATEWAY", str(gateway), create=True)
     else:
-        set_text(port, "IP", str(dev_cfg.get("ip", "")), create=True)
-        set_text(port, "SUBNET", str(dev_cfg.get("subnet", "255.255.255.0")), create=True)
-        set_text(port, "PORT_DHCP_ENABLE", "false", create=True)
-    set_text(port, "POWER", "true", create=True)
-    # Template tag is UP_METHOD (UPMETHOD was a legacy typo in early code).
-    set_text(port, "UP_METHOD", "5" if wants_dhcp else "3", create=True)
-
-    gateway = dev_cfg.get("gateway_ip") or dev_cfg.get("gateway", "")
-    if gateway and not wants_dhcp:
-        set_text(port, "PORT_GATEWAY", str(gateway), create=True)
+        # Fallback: usa ip/subnet dal dev_cfg sul primo slot
+        ip = str(dev_cfg.get("ip", "")).strip()
+        mask = str(dev_cfg.get("subnet", "255.255.255.0")).strip()
+        if not ip:
+            return
+        slot_module = slots[0].find("MODULE")
+        if slot_module is None:
+            return
+        port = slot_module.find("PORT")
+        if port is None:
+            return
+        set_text(port, "IP", ip, create=True)
+        set_text(port, "SUBNET", mask, create=True)
+        set_text(port, "POWER", "true", create=True)
+        set_text(port, "UP_METHOD", "3", create=True)
+        gateway = dev_cfg.get("gateway_ip", "")
+        if gateway:
+            set_text(port, "PORT_GATEWAY", str(gateway), create=True)
 
 
 def _write_running_config_lines(running: ET.Element, commands: list[str]) -> None:
@@ -121,47 +152,11 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
         if cfg["dns"]:
             write_dns_records(engine, dev_cfg)
 
-    # DHCP server (server-side), bind to FastEthernet0 pool if present in template.
-    if "dhcp" in cfg:
-        dhcps = engine.find("DHCP_SERVERS")
-        if dhcps is not None:
-            assoc = dhcps.find("ASSOCIATED_PORTS/ASSOCIATED_PORT")
-            if assoc is None:
-                # Create the minimal container if missing.
-                assoc_ports = dhcps.find("ASSOCIATED_PORTS") or ET.SubElement(dhcps, "ASSOCIATED_PORTS")
-                assoc = ET.SubElement(assoc_ports, "ASSOCIATED_PORT")
-                set_text(assoc, "NAME", "FastEthernet0", create=True)
-                dhcp_server = ET.SubElement(assoc, "DHCP_SERVER")
-            else:
-                dhcp_server = assoc.find("DHCP_SERVER") or ET.SubElement(assoc, "DHCP_SERVER")
+    # DHCP Server
+    if cfg.get("dhcp"):
+        from app.services.pkt_generator.server_config import write_dhcp_config
 
-            set_text(dhcp_server, "ENABLED", "1" if cfg["dhcp"] else "0", create=True)
-            if cfg["dhcp"] and dev_cfg.get("ip") and dev_cfg.get("subnet") and dev_cfg.get("gateway_ip"):
-                pools = dhcp_server.find("POOLS") or ET.SubElement(dhcp_server, "POOLS")
-                pools.clear()
-                pool = ET.SubElement(pools, "POOL")
-                set_text(pool, "NAME", "LAN", create=True)
-                # Pool parameters inferred from the server-connected LAN.
-                try:
-                    iface = ipaddress.IPv4Interface(f"{dev_cfg['gateway_ip']}/{dev_cfg['subnet']}")
-                    net = iface.network
-                    start = ipaddress.IPv4Address(int(net.network_address) + 10)
-                    end = ipaddress.IPv4Address(int(net.broadcast_address) - 1)
-                except Exception:
-                    net = None
-                    start = None
-                    end = None
-                if net is not None:
-                    set_text(pool, "NETWORK", str(net.network_address), create=True)
-                    set_text(pool, "MASK", str(net.netmask), create=True)
-                set_text(pool, "DEFAULT_ROUTER", str(dev_cfg.get("gateway_ip")), create=True)
-                if start is not None:
-                    set_text(pool, "START_IP", str(start), create=True)
-                if end is not None:
-                    set_text(pool, "END_IP", str(end), create=True)
-                # DNS server: prefer the server itself if DNS is enabled, else keep defaults.
-                if cfg.get("dns") and dev_cfg.get("ip"):
-                    set_text(pool, "DNS_SERVER", str(dev_cfg.get("ip")), create=True)
+        write_dhcp_config(engine, dev_cfg)
 
     # FTP
     if "ftp" in cfg:
@@ -319,7 +314,7 @@ def build_device(
             used_mem_addrs.add(mem_addr)
             set_text(logical, "MEM_ADDR", mem_addr, create=True)
 
-    if dev_cfg.get("ip") or dev_cfg.get("dhcp_client"):
+    if dev_cfg.get("ip") or dev_cfg.get("dhcp_client") or dev_cfg.get("interfaces"):
         _update_device_ip(engine, dev_cfg)
 
     category = (device_meta.get("category") or resolved_type or "").lower()

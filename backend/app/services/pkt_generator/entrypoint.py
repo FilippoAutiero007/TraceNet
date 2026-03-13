@@ -205,15 +205,28 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 continue
             _set_router_iface(router_cfg, router_port, ip=seg["gateway"], mask=seg["mask"], role="lan")
 
-        # 2) Assign router WAN interfaces (/30) for router-router links, starting at 10.0.0.0/30.
-        wan_base = ipaddress.ip_network("10.0.0.0/8")
-        wan_cursor = ipaddress.IPv4Network("10.0.0.0/30")
-        rr_links = [l for l in links_config if str(l.get("from", "")).startswith("Router") and str(l.get("to", "")).startswith("Router")]
+        # 2) Assign router WAN interfaces for router-router links.
+        # L'utente può specificare wan_network e wan_prefix in topology config.
+        wan_network_str = topology_cfg.get("wan_network", "11.0.0.0")
+        wan_prefix = int(topology_cfg.get("wan_prefix", 30))
+        try:
+            wan_base = ipaddress.ip_network(f"{wan_network_str}/{wan_prefix}", strict=False)
+            block_size = 2 ** (32 - wan_prefix)
+        except Exception:
+            wan_base = ipaddress.ip_network("11.0.0.0/30", strict=False)
+            block_size = 4
+            wan_prefix = 30
+
+        rr_links = [
+            l
+            for l in links_config
+            if str(l.get("from", "")).startswith("Router") and str(l.get("to", "")).startswith("Router")
+        ]
         for idx, link in enumerate(rr_links):
-            # /30 blocks increase by 4 addresses
-            net_addr = int(wan_cursor.network_address) + (idx * 4)
-            net = ipaddress.IPv4Network((ipaddress.IPv4Address(net_addr), 30))
-            if net.network_address not in wan_base:
+            net_addr = int(wan_base.network_address) + (idx * block_size)
+            try:
+                net = ipaddress.IPv4Network((ipaddress.IPv4Address(net_addr), wan_prefix), strict=False)
+            except Exception:
                 break
             from_router = str(link.get("from"))
             to_router = str(link.get("to"))
@@ -223,7 +236,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 continue
             ip1 = str(ipaddress.IPv4Address(int(net.network_address) + 1))
             ip2 = str(ipaddress.IPv4Address(int(net.network_address) + 2))
-            mask = "255.255.255.252"
+            mask = str(net.netmask)
             r1 = next((r for r in routers_config if r["name"] == from_router), None)
             r2 = next((r for r in routers_config if r["name"] == to_router), None)
             if r1:
@@ -278,13 +291,29 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             devices_config=devices_config,
         )
 
+        # Propaga dhcp_server_ip ai router per ip helper-address
+        for d in devices_config:
+            if d.get("type") == "server" and d.get("ip"):
+                svc = {str(s).lower() for s in (d.get("server_services") or [])}
+                if "dhcp" in svc:
+                    for r in routers_config:
+                        r["dhcp_server_ip"] = d["ip"]
+                    break
+
         pc_idx = 0
+           # Verifica se c'è un server DHCP dedicato tra i server già aggiunti
+        has_dhcp_server = any(
+            "dhcp" in {str(s).lower() for s in (d.get("server_services") or [])}
+            for d in devices_config
+            if str(d.get("type", "")).lower() == "server"
+        )
+
         while pc_idx < num_pcs:
             name = safe_name("PC", pc_idx)
             switch = link_to_switch.get(name)
             seg = switch_to_lan.get(switch) if switch else (lan_segments[pc_idx % len(lan_segments)] if lan_segments else None)
             pc_cfg: dict[str, Any] = {"name": name, "type": "pc"}
-            if dhcp_from_router:
+            if dhcp_from_router or has_dhcp_server:
                 pc_cfg["dhcp_client"] = True
             elif seg is not None:
                 ip = _alloc_ip(seg)
@@ -354,7 +383,12 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         protocol_norm = routing_protocol.strip().lower()
         if protocol_norm in {"static", "statica"}:
             for r in routers_config:
-                r["routes"] = calculate_static_routes(str(r["name"]), devices_config, links_config)
+                r["routes"] = calculate_static_routes(
+                    str(r["name"]),
+                    devices_config,
+                    links_config,
+                    wan_prefix=wan_prefix,
+                )
 
         logger.info("Generating %s devices and %s links", len(devices_config), len(links_config))
 

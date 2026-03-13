@@ -100,24 +100,30 @@ def calculate_static_routes(
     router_name: str,
     all_devices: list[dict[str, Any]],
     links_config: list[dict[str, Any]],
+    *,
+    wan_prefix: int = 30,
 ) -> list[dict[str, str]]:
     """
-    Compute static routes toward remote LAN subnets.
+    Calcola le rotte statiche per un router dato.
 
-    Assumptions:
-    - entrypoint has populated router `interfaces` with role=lan/wan and IP/mask
-    - entrypoint has populated router `interface_ips` mapping (port name -> IP)
+    Logica:
+    1. Trova le interfacce LAN del router (role=lan) → subnet direttamente connesse
+    2. Costruisce un grafo router-router usando le interfacce WAN (role=wan)
+    3. Per ogni subnet LAN remota, calcola il primo hop e usa come next-hop l'IP WAN del router vicino
+
+    Returns: lista di {"network": "x.x.x.x", "mask": "x.x.x.x", "next_hop": "x.x.x.x"}
     """
-    routers = _iter_router_devices(all_devices)
-    routers_by_name = {str(r.get("name", "")): r for r in routers if r.get("name")}
-    me = routers_by_name.get(router_name)
-    if me is None:
+    _ = wan_prefix
+
+    router_map = {d["name"]: d for d in _iter_router_devices(all_devices) if d.get("name")}
+    me = router_map.get(router_name)
+    if not me:
         return []
 
-    def lan_networks(dev: dict[str, Any]) -> list[ipaddress.IPv4Network]:
+    def _iter_iface_networks(dev: dict[str, Any], *, role: str) -> list[ipaddress.IPv4Network]:
         out: list[ipaddress.IPv4Network] = []
         for iface in dev.get("interfaces") or []:
-            if str(iface.get("role", "")).lower() != "lan":
+            if str(iface.get("role", "")).lower() != role:
                 continue
             ip = str(iface.get("ip", "")).strip()
             mask = str(iface.get("mask", "")).strip()
@@ -125,38 +131,93 @@ def calculate_static_routes(
             if net is not None:
                 out.append(net)
         # Backward-compatible single-interface configs
-        if not out and dev.get("ip") and dev.get("subnet"):
+        if role == "lan" and not out and dev.get("ip") and dev.get("subnet"):
             net = _as_ipv4_network(str(dev["ip"]), str(dev["subnet"]))
             if net is not None:
                 out.append(net)
         return out
 
-    my_lans = {n.with_prefixlen for n in lan_networks(me)}
+    my_lan_networks = {n.with_prefixlen for n in _iter_iface_networks(me, role="lan")}
+
     remote_lans: dict[str, list[ipaddress.IPv4Network]] = {}
-    for r_name, r in routers_by_name.items():
+    for r_name, r in router_map.items():
         if r_name == router_name:
             continue
-        nets = [n for n in lan_networks(r) if n.with_prefixlen not in my_lans]
+        nets = [n for n in _iter_iface_networks(r, role="lan") if n.with_prefixlen not in my_lan_networks]
         if nets:
             remote_lans[r_name] = nets
 
-    graph = _build_router_graph(routers, links_config)
-    # Build a quick lookup for (router, neighbor) -> next-hop IP (neighbor side).
+    # Build WAN adjacency: router -> neighbors, and (router, neighbor) -> neighbor WAN IP.
+    graph: dict[str, list[str]] = {name: [] for name in router_map}
     nh_ip: dict[tuple[str, str], str] = {}
-    for u, edges in graph.items():
-        for v, v_ip in edges:
-            if v_ip:
-                nh_ip[(u, v)] = v_ip
+
+    def _get_iface_ip(dev: dict[str, Any], port: str) -> str:
+        for iface in dev.get("interfaces") or []:
+            if str(iface.get("name", "")).strip() != port:
+                continue
+            if str(iface.get("role", "")).lower() != "wan":
+                continue
+            return str(iface.get("ip", "")).strip()
+        return ""
+
+    for link in links_config or []:
+        a = str(link.get("from", "")).strip()
+        b = str(link.get("to", "")).strip()
+        if not a.startswith("Router") or not b.startswith("Router"):
+            continue
+        a_port = str(link.get("from_port", "")).strip()
+        b_port = str(link.get("to_port", "")).strip()
+        if not a_port or not b_port:
+            continue
+        ra = router_map.get(a)
+        rb = router_map.get(b)
+        if not ra or not rb:
+            continue
+        a_ip = _get_iface_ip(ra, a_port)
+        b_ip = _get_iface_ip(rb, b_port)
+        if not a_ip or not b_ip:
+            continue
+        graph.setdefault(a, []).append(b)
+        graph.setdefault(b, []).append(a)
+        nh_ip[(a, b)] = b_ip
+        nh_ip[(b, a)] = a_ip
+
+    def _first_hop(start: str, goal: str) -> Optional[str]:
+        if start == goal:
+            return None
+        q: deque[str] = deque([start])
+        prev: dict[str, Optional[str]] = {start: None}
+        while q:
+            cur = q.popleft()
+            for nxt in graph.get(cur, []):
+                if nxt in prev:
+                    continue
+                prev[nxt] = cur
+                if nxt == goal:
+                    q.clear()
+                    break
+                q.append(nxt)
+        if goal not in prev:
+            return None
+        cur = goal
+        while prev.get(cur) is not None and prev[cur] != start:
+            cur = prev[cur]  # type: ignore[assignment]
+        return cur if prev.get(cur) == start else None
 
     routes: list[dict[str, str]] = []
+    added: set[str] = set()
     for dst_router, nets in remote_lans.items():
-        hop = _bfs_next_hop(router_name, dst_router, graph)
-        if hop is None:
+        hop = _first_hop(router_name, dst_router)
+        if not hop:
             continue
         next_hop_ip = nh_ip.get((router_name, hop), "")
         if not next_hop_ip:
             continue
         for net in nets:
+            key = net.with_prefixlen
+            if key in my_lan_networks or key in added:
+                continue
+            added.add(key)
             routes.append(
                 {
                     "network": str(net.network_address),
@@ -164,6 +225,7 @@ def calculate_static_routes(
                     "next_hop": str(next_hop_ip),
                 }
             )
+
     return routes
 
 
@@ -272,6 +334,12 @@ def generate_router_config(
             commands.append(f" ip access-group {acl_name} {direction}")
 
         commands.append(" no shutdown")
+
+        # ip helper-address per DHCP relay se c'è un server DHCP dedicato
+        dhcp_server_ip = dev_cfg.get("dhcp_server_ip", "")
+        role = str(iface.get("role", "")).strip().lower()
+        if dhcp_server_ip and role == "lan":
+            commands.append(f" ip helper-address {dhcp_server_ip}")
         commands.append("!")
 
     # DHCP from router (IOS DHCP server)
@@ -343,8 +411,24 @@ def generate_router_config(
         commands.append("router rip")
         commands.append(" version 2")
         commands.append(" no auto-summary")
-        for net_addr in sorted(connected_nets):
-            commands.append(f" network {net_addr}")
+        # Aggiungi network per ogni interfaccia configurata
+        networks_added = set()
+        for iface in dev_cfg.get("interfaces", []):
+            ip = str(iface.get("ip", "")).strip()
+            mask = str(iface.get("mask", "")).strip()
+            if not ip or not mask:
+                continue
+            try:
+                import ipaddress
+
+                # RIP vuole il network address classful
+                net = ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
+                net_str = str(net.network_address)
+                if net_str not in networks_added:
+                    networks_added.add(net_str)
+                    commands.append(f" network {net_str}")
+            except Exception:
+                continue
         commands.append("!")
     elif protocol == "static":
         routes = dev_cfg.get("routes") or calculate_static_routes(name, all_devices, links_config)

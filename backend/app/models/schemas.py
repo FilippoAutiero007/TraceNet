@@ -117,6 +117,16 @@ class TopologyConfig(BaseModel):
     )
     backbone_mode: str = Field(default="chain", description="Router backbone strategy: chain or full-mesh")
     gateway_position: str = Field(default="first", description="Gateway position: 'first' (default) or 'last'")
+    wan_network: str = Field(
+        default="11.0.0.0",
+        description="Base network per i link WAN router-router (default classe A pubblica)",
+    )
+    wan_prefix: int = Field(
+        default=30,
+        ge=8,
+        le=31,
+        description="Prefix length per i link WAN (/30 di default, minimo spreco IP)",
+    )
 
     @field_validator("backbone_mode")
     @classmethod
@@ -133,6 +143,17 @@ class TopologyConfig(BaseModel):
         if normalized not in {"first", "last"}:
             raise ValueError("gateway_position must be 'first' or 'last'")
         return normalized
+
+    @field_validator("wan_network")
+    @classmethod
+    def validate_wan_network(cls, value: str) -> str:
+        import ipaddress
+
+        try:
+            ipaddress.ip_address(value.strip())
+        except ValueError:
+            raise ValueError(f"wan_network deve essere un indirizzo IP valido, ricevuto: {value!r}")
+        return value.strip()
 
 
 class VlanConfig(BaseModel):
