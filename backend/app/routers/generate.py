@@ -2,6 +2,7 @@
 
 import os
 import logging
+import ipaddress
 from threading import Lock
 
 from fastapi import APIRouter, HTTPException
@@ -28,6 +29,13 @@ from app.services.subnet_calculator import calculate_vlsm
 _pkt_generation_lock = Lock()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["generate"])
+
+
+def _default_subnet_for_base(base_network: str) -> SubnetRequest:
+    """Use the full base network when no explicit subnets are provided."""
+    net = ipaddress.ip_network(base_network, strict=False)
+    usable_hosts = max(1, int(net.num_addresses) - 2)
+    return SubnetRequest(name="LAN", required_hosts=usable_hosts)
 
 
 def _validate_filename(filename: str) -> str:
@@ -62,12 +70,15 @@ async def parse_network_endpoint(request: ParseNetworkRequest):
 async def generate_network(request: NormalizedNetworkRequest):
     """Generate CLI configuration from normalized JSON only."""
     try:
-        subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
+        # Ensure protocol normalization stays consistent with schema expectations.
+        protocol = request.routing_protocol.strip().upper()
+        subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
         network_config = NetworkConfig(
             base_network=request.base_network,
             subnets=subnets_input,
             devices=DeviceConfig(routers=request.routers, switches=request.switches, pcs=request.pcs),
-            routing_protocol=RoutingProtocol(request.routing_protocol.lower()),
+            routing_protocol=RoutingProtocol(protocol if protocol != "STATIC" else "static"),
+            dhcp_dns=request.dhcp_dns,
         )
 
         subnets = calculate_vlsm(network_config.base_network, network_config.subnets)
@@ -93,7 +104,7 @@ async def generate_network(request: NormalizedNetworkRequest):
 async def generate_pkt_file(request: NormalizedNetworkRequest):
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
     try:
-        subnets_input = request.subnets or [SubnetRequest(name="LAN", required_hosts=max(request.pcs, 1))]
+        subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
         protocol_value = "static" if request.routing_protocol == "STATIC" else request.routing_protocol
 
         network_config_dict = {
@@ -102,6 +113,7 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
             "devices": {"routers": request.routers, "switches": request.switches, "pcs": request.pcs, "servers": getattr(request, "servers", 0)},
             "routing_protocol": protocol_value,
             "dhcp_from_router": getattr(request, "dhcp_from_router", False),
+            "dhcp_dns": getattr(request, "dhcp_dns", None),
             "server_services": getattr(request, "server_services", []) or [],
             "servers_config": [s.model_dump() for s in request.servers_config] if request.servers_config else [],
             "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
