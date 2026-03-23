@@ -64,6 +64,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         # Backward-compatible defaults (preserve current behavior unless explicitly requested).
         routing_protocol = str(config.get("routing_protocol", "static")).strip()
         dhcp_from_router = bool(config.get("dhcp_from_router", False))
+        dhcp_dns = config.get("dhcp_dns")
         server_services = list(config.get("server_services") or [])
         servers_config_list = config.get("servers_config") or []
         if not isinstance(servers_config_list, list):
@@ -102,6 +103,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 "type": router_type,
                 "routing_protocol": routing_protocol,
                 "dhcp_from_router": dhcp_from_router,
+                "dhcp_dns": dhcp_dns,
                 "nat": nat_global,
                 "acl": acl_global,
                 # Filled below after link analysis
@@ -146,8 +148,10 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             lan_segments.append(
                 {
                     "name": str(getattr(subnet, "name", "")),
+                    "network": str(getattr(subnet, "network", "")),
                     "mask": mask,
                     "gateway": str(gw_ip),
+                    "dns_server": dhcp_dns if dhcp_dns else getattr(subnet, "dns_server", None),
                     "start_ip": start_ip,
                     "end_ip": end_ip,
                     "next_ip": start_ip,
@@ -169,16 +173,29 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 switch_to_lan[sw["name"]] = seg
 
         # Helper: add/update router interface config (so config_generator can build IOS config).
-        def _set_router_iface(router_cfg: dict[str, Any], if_name: str, *, ip: str, mask: str, role: str) -> None:
+        def _set_router_iface(
+            router_cfg: dict[str, Any],
+            if_name: str,
+            *,
+            ip: str,
+            mask: str,
+            role: str,
+            dns_server: str | None = None,
+        ) -> None:
             interfaces = router_cfg.setdefault("interfaces", [])
             iface_ip = router_cfg.setdefault("interface_ips", {})
             iface_ip[str(if_name)] = str(ip)
             for entry in interfaces:
                 if str(entry.get("name", "")) == if_name:
                     entry.update({"ip": str(ip), "mask": str(mask), "role": role})
+                    if dns_server is not None:
+                        entry["dns_server"] = str(dns_server)
                     break
             else:
-                interfaces.append({"name": str(if_name), "ip": str(ip), "mask": str(mask), "role": role})
+                iface_entry = {"name": str(if_name), "ip": str(ip), "mask": str(mask), "role": role}
+                if dns_server is not None:
+                    iface_entry["dns_server"] = str(dns_server)
+                interfaces.append(iface_entry)
 
             # Backward-compat: ensure base router ip/subnet exists for downstream code.
             if role == "lan" and not router_cfg.get("ip"):
@@ -203,7 +220,14 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             router_cfg = next((r for r in routers_config if r["name"] == router_name), None)
             if router_cfg is None:
                 continue
-            _set_router_iface(router_cfg, router_port, ip=seg["gateway"], mask=seg["mask"], role="lan")
+            _set_router_iface(
+                router_cfg,
+                router_port,
+                ip=seg["gateway"],
+                mask=seg["mask"],
+                role="lan",
+                dns_server=seg.get("dns_server"),
+            )
 
         # 2) Assign router WAN interfaces for router-router links.
         # L'utente può specificare wan_network e wan_prefix in topology config.
@@ -281,7 +305,14 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             if seg is not None:
                 ip = _alloc_ip(seg)
                 if ip:
-                    srv_cfg.update({"ip": ip, "subnet": seg["mask"], "gateway_ip": seg["gateway"]})
+                    srv_cfg.update(
+                        {
+                            "ip": ip,
+                            "subnet": seg["mask"],
+                            "gateway_ip": seg["gateway"],
+                            "network": seg.get("network", ""),
+                        }
+                    )
             devices_config.append(srv_cfg)
 
         build_server_configs(
@@ -290,6 +321,39 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             server_services_global=server_services,
             devices_config=devices_config,
         )
+
+        # Prepara i dhcp_pools per i server DHCP (per ora: un pool per la LAN principale del server).
+        for d in devices_config:
+            if str(d.get("type", "")).lower() != "server":
+                continue
+            services = {str(s).strip().lower() for s in (d.get("server_services") or [])}
+            if "dhcp" not in services:
+                continue
+
+            server_ip = str(d.get("ip", "")).strip()
+            mask = str(d.get("subnet", "255.255.255.0")).strip()
+            gw = str(d.get("gateway_ip", "")).strip()
+            if not gw:
+                # Se manca gateway esplicito, usa il server come fallback
+                gw = server_ip
+
+            # Calcola network address della LAN del server
+            try:
+                net = ipaddress.IPv4Network(f"{server_ip}/{mask}", strict=False)
+                network_addr = str(net.network_address)
+            except Exception:
+                network_addr = "0.0.0.0"
+
+            d["dhcp_pools"] = [
+                {
+                    "name": f"{d.get('name', 'server')}_pool",
+                    "network": network_addr,
+                    "mask": mask,
+                    "gateway": gw,
+                    "dns": server_ip,
+                    # start_ip/end_ip verranno calcolati automaticamente in write_dhcp_config
+                }
+            ]
 
         # Propaga dhcp_server_ip ai router per ip helper-address
         for d in devices_config:
@@ -301,26 +365,65 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     break
 
         pc_idx = 0
-           # Verifica se c'è un server DHCP dedicato tra i server già aggiunti
+        # Verifica se c'è un server DHCP dedicato tra i server già aggiunti
         has_dhcp_server = any(
             "dhcp" in {str(s).lower() for s in (d.get("server_services") or [])}
             for d in devices_config
             if str(d.get("type", "")).lower() == "server"
         )
 
+        # Trova l'IP del server DHCP (se esiste)
+        dhcp_srv_ip: str | None = None
+        if has_dhcp_server:
+            for d in devices_config:
+                if str(d.get("type", "")).lower() != "server":
+                    continue
+                services = {str(s).strip().lower() for s in (d.get("server_services") or [])}
+                if "dhcp" in services and d.get("ip"):
+                    dhcp_srv_ip = str(d["ip"])
+                    break
+
         while pc_idx < num_pcs:
             name = safe_name("PC", pc_idx)
             switch = link_to_switch.get(name)
-            seg = switch_to_lan.get(switch) if switch else (lan_segments[pc_idx % len(lan_segments)] if lan_segments else None)
-            pc_cfg: dict[str, Any] = {"name": name, "type": "pc"}
+            seg = switch_to_lan.get(switch) if switch else (
+                lan_segments[pc_idx % len(lan_segments)] if lan_segments else None
+            )
+
+            pc_cfg: dict[str, Any] = {
+                "name": name,
+                "type": "pc",
+            }
+
+            # Decide la modalità IP per il PC: DHCP vs static
             if dhcp_from_router or has_dhcp_server:
+                # PC client DHCP (router o server con ip helper-address)
                 pc_cfg["dhcp_client"] = True
+                pc_cfg["dhcp_mode"] = "dhcp"
+
+                if seg is not None:
+                    # gateway della LAN (serve per ENGINE/GATEWAY)
+                    pc_cfg["gateway_ip"] = seg["gateway"]
+
+                if dhcp_srv_ip:
+                    # usato da _set_pc_dhcp_mode per DHCP_SERVER_IP / PORT_DNS
+                    pc_cfg["dhcp_server_ip"] = dhcp_srv_ip
+
             elif seg is not None:
                 ip = _alloc_ip(seg)
                 if ip:
-                    pc_cfg.update({"ip": ip, "subnet": seg["mask"], "gateway_ip": seg["gateway"]})
+                    pc_cfg.update(
+                        {
+                            "ip": ip,
+                            "subnet": seg["mask"],
+                            "gateway_ip": seg["gateway"],
+                            "dhcp_mode": "static",
+                        }
+                    )
+
             devices_config.append(pc_cfg)
             pc_idx += 1
+
 
         # 4) Switch VLAN port roles (best-effort; trunks only if VLANs are provided).
         switches_by_name = {sw["name"]: sw for sw in switches_config}
@@ -364,22 +467,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     if sw2:
                         sw2.setdefault("trunk_ports", []).append(str(link.get("to_port", "")).strip())
 
-        # 5) Router DHCP DNS option: prefer the first server IP if DNS is enabled there.
-        dns_ip: str | None = None
-        for d in devices_config:
-            if str(d.get("type", "")).lower() != "server":
-                continue
-            services = {str(s).strip().lower() for s in (d.get("server_services") or [])}
-            if "dns" not in services:
-                continue
-            if d.get("ip"):
-                dns_ip = str(d["ip"])
-                break
-        if dns_ip and dhcp_from_router:
-            for r in routers_config:
-                r["dhcp_dns"] = dns_ip
-
-        # 6) Static routes: compute automatically after interfaces are populated.
+        # 5) Static routes: compute automatically after interfaces are populated.
         protocol_norm = routing_protocol.strip().lower()
         if protocol_norm in {"static", "statica"}:
             for r in routers_config:

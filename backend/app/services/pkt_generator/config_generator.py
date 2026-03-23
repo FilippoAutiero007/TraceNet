@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from collections import deque
 from typing import Any, Iterable, Optional
 
+logger = logging.getLogger(__name__)
 
 def _as_ipv4_network(ip: str, mask: str) -> Optional[ipaddress.IPv4Network]:
     try:
@@ -22,6 +24,50 @@ def _normalize_protocol(value: Any) -> str:
     if proto in {"ospf"}:
         return "ospf"
     return proto
+
+
+def _resolve_router_pool_dns(
+    dev_cfg: dict[str, Any],
+    iface: dict[str, Any],
+    *,
+    router_name: str,
+    iface_name: str,
+) -> Optional[str]:
+    """
+    Resolve DHCP DNS server for a router LAN pool with priority:
+    1) network-level `dhcp_dns`
+    2) interface/subnet-level `dns_server` (solo se non è 8.8.8.8 default)
+    3) no DNS line
+    """
+    # Filtra dns_server sull'interfaccia se è il default indesiderato
+    iface_dns = iface.get("dns_server")
+    if iface_dns in (None, "", "8.8.8.8"):
+        iface_dns = None
+
+    candidates: list[tuple[str, Any]] = [
+        ("network_config.dhcp_dns", dev_cfg.get("dhcp_dns")),
+        ("subnet.dns_server", iface_dns),
+    ]
+
+    for source, raw in candidates:
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        try:
+            return str(ipaddress.IPv4Address(text))
+        except Exception:
+            logger.warning(
+                "Invalid DHCP DNS '%s' from %s for %s/%s; omitting dns-server line.",
+                text,
+                source,
+                router_name,
+                iface_name,
+            )
+            continue
+    return None
+
 
 
 def _iter_router_devices(all_devices: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -123,7 +169,13 @@ def calculate_static_routes(
     def _iter_iface_networks(dev: dict[str, Any], *, role: str) -> list[ipaddress.IPv4Network]:
         out: list[ipaddress.IPv4Network] = []
         for iface in dev.get("interfaces") or []:
-            if str(iface.get("role", "")).lower() != role:
+            iface_role = str(iface.get("role", "")).lower()
+            if role == "lan":
+                # Be permissive: when role is missing, treat interface as LAN
+                # so static routes can still be computed from minimal inputs.
+                if iface_role and iface_role != "lan":
+                    continue
+            elif iface_role != role:
                 continue
             ip = str(iface.get("ip", "")).strip()
             mask = str(iface.get("mask", "")).strip()
@@ -155,7 +207,9 @@ def calculate_static_routes(
         for iface in dev.get("interfaces") or []:
             if str(iface.get("name", "")).strip() != port:
                 continue
-            if str(iface.get("role", "")).lower() != "wan":
+            iface_role = str(iface.get("role", "")).lower()
+            # Missing role is accepted to support legacy/minimal configs.
+            if iface_role and iface_role != "wan":
                 continue
             return str(iface.get("ip", "")).strip()
         return ""
@@ -359,6 +413,8 @@ def generate_router_config(
             try:
                 gw = ipaddress.IPv4Address(ip)
                 excl_end = ipaddress.IPv4Address(int(gw) + 4)
+                # Note: the excluded range may include the configured DNS IP. This is acceptable:
+                # exclusion prevents DHCP lease assignment, but clients can still query that DNS server.
                 if excl_end in net:
                     commands.append(f"ip dhcp excluded-address {gw} {excl_end}")
                 else:
@@ -368,8 +424,14 @@ def generate_router_config(
             commands.append(f"ip dhcp pool {pool_name}")
             commands.append(f" network {net.network_address} {net.netmask}")
             commands.append(f" default-router {ip}")
-            dns = str(dev_cfg.get("dhcp_dns", "8.8.8.8")).strip() or "8.8.8.8"
-            commands.append(f" dns-server {dns}")
+            dns_ip = _resolve_router_pool_dns(
+                dev_cfg,
+                iface,
+                router_name=name,
+                iface_name=str(iface.get("name", "")),
+            )
+            if dns_ip:
+                commands.append(f" dns-server {dns_ip}")
             commands.append("!")
 
     # NAT (static/dynamic/pat) - best-effort permissive schema
@@ -419,8 +481,6 @@ def generate_router_config(
             if not ip or not mask:
                 continue
             try:
-                import ipaddress
-
                 # RIP vuole il network address classful
                 net = ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
                 net_str = str(net.network_address)

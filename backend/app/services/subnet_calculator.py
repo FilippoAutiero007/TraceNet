@@ -63,19 +63,15 @@ def calculate_vlsm(base_network: str, subnets: List[SubnetRequest]) -> List[Subn
                 f"Required: {2**host_bits} addresses"
             )
         
-        # Get all usable hosts
-        hosts = list(subnet.hosts())
-        
-        if len(hosts) < 2:
+        # Avoid enumerating all hosts for large subnets.
+        if subnet.num_addresses < 4:
             raise ValueError(f"Subnet too small for '{subnet_req.name}'")
-        
-        # First usable IP is gateway
-        gateway = hosts[0]
-        
-        # Usable range: second to last usable IP
-        usable_start = hosts[1] if len(hosts) > 1 else hosts[0]
-        usable_end = hosts[-1]
-        
+
+        # First usable IP is gateway; last usable is broadcast - 1.
+        gateway = subnet.network_address + 1
+        usable_start = subnet.network_address + 2
+        usable_end = subnet.broadcast_address - 1
+
         result = SubnetResult(
             name=subnet_req.name,
             network=str(subnet),
@@ -84,7 +80,8 @@ def calculate_vlsm(base_network: str, subnets: List[SubnetRequest]) -> List[Subn
             usable_range=[str(usable_start), str(usable_end)],
             broadcast=str(subnet.broadcast_address),
             total_hosts=subnet.num_addresses,
-            usable_hosts=len(hosts) - 1  # Exclude gateway
+            usable_hosts=subnet.num_addresses - 2,  # Exclude network and broadcast
+            dns_server=subnet_req.dns_server,
         )
         
         results.append(result)

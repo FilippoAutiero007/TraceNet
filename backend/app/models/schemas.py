@@ -20,7 +20,8 @@ class RoutingProtocol(str, Enum):
 class SubnetRequest(BaseModel):
     """Request for a single subnet"""
     name: str = Field(..., min_length=1, max_length=64, description="Subnet name")
-    required_hosts: int = Field(..., ge=1, le=4094, description="Number of required hosts")
+    required_hosts: int = Field(..., ge=1, le=16777214, description="Number of required hosts")
+    dns_server: Optional[str] = Field(default=None, description="Optional DNS server IP for this subnet")
 
     @field_validator("name")
     @classmethod
@@ -45,6 +46,7 @@ class NetworkConfig(BaseModel):
     subnets: List[SubnetRequest] = Field(default_factory=list, max_length=10)
     devices: DeviceConfig = Field(default_factory=DeviceConfig)
     routing_protocol: RoutingProtocol = Field(default=RoutingProtocol.STATIC)
+    dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
 
     @field_validator("base_network")
     @classmethod
@@ -66,6 +68,7 @@ class SubnetResult(BaseModel):
     broadcast: str
     total_hosts: int
     usable_hosts: int
+    dns_server: Optional[str] = None
 
 
 class GenerateRequest(BaseModel):
@@ -106,6 +109,7 @@ class NormalizedSubnet(BaseModel):
     """Normalized subnet entry used by backend generation."""
     name: str = Field(..., min_length=1)
     required_hosts: int = Field(..., ge=1)
+    dns_server: Optional[str] = Field(default=None, description="Optional DNS server IP for this subnet")
 
 
 class TopologyConfig(BaseModel):
@@ -204,6 +208,7 @@ class NormalizedNetworkRequest(BaseModel):
     servers: int = Field(default=0, ge=0)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     dhcp_from_router: bool = Field(default=False, description="Enable IOS DHCP pools on routers and set PCs as DHCP clients")
+    dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
     server_services: List[str] = Field(default_factory=list, description="Services to enable on Server-PT (Packet Tracer XML)")
     servers_config: List[ServerConfig] = Field(default_factory=list)
     vlans: List[VlanConfig] = Field(default_factory=list, description="VLAN definitions for switches")
