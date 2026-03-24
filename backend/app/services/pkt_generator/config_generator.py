@@ -569,5 +569,6 @@ def generate_server_config(dev_cfg: dict[str, Any]) -> dict[str, Any]:
         # Optional service parameters (best-effort defaults).
         "ftp_user": str(dev_cfg.get("ftp_user", "cisco")),
         "ftp_password": str(dev_cfg.get("ftp_password", "cisco")),
+        "ftp_users": dev_cfg.get("ftp_users", []),
         "smtp_domain": str(dev_cfg.get("smtp_domain", dev_cfg.get("email_domain", "")) or "example.com"),
     }
