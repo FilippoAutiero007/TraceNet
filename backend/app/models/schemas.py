@@ -196,6 +196,9 @@ class AclConfig(BaseModel):
 class ServerConfig(BaseModel):
     services: List[str] = Field(default_factory=list)
     hostname: str = Field(default="")
+    ftp_user: Optional[str] = Field(default=None)
+    ftp_password: Optional[str] = Field(default=None)
+    ftp_users: Optional[list] = Field(default=None)
 
 
 

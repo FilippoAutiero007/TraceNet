@@ -3,16 +3,14 @@ NetTrace - FastAPI Backend
 Converts natural language to Cisco Packet Tracer configurations
 """
 
+import os
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-import os
+
 from app.config import settings
 from app.utils.logger import setup_logger
-from app.utils.rate_limiter import limiter
 
 load_dotenv()
 
@@ -23,22 +21,23 @@ logger = setup_logger("tracenet", log_level)
 app = FastAPI(
     title="NetTrace API",
     description="Convert natural language to Cisco network configurations",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
-app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"}))
 
 @app.on_event("startup")
 async def startup_event():
     """Log application startup"""
     runtime_checks = settings.validate_runtime()
-    logger.info("TraceNet API starting up", extra={
-        "environment": settings.environment,
-        "log_level": log_level,
-        "runtime_checks": runtime_checks,
-    })
+    logger.info(
+        "TraceNet API starting up",
+        extra={
+            "environment": settings.environment,
+            "log_level": log_level,
+            "runtime_checks": runtime_checks,
+        },
+    )
+
 
 # CORS middleware for frontend
 # Allow localhost for dev + Vercel production/preview domains
@@ -54,22 +53,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
         "service": "NetTrace API",
-        "version": "1.0.0"
+        "version": "1.0.0",
     }
+
 
 @app.get("/api/pka2xml-status")
 def check_pka2xml():
     """Check availability of pka2xml encoding tool"""
     import shutil
-    import subprocess
+
     pka_path = shutil.which("pka2xml")
-    
+
     version_info = "Unknown"
     if pka_path:
         try:
@@ -78,13 +79,15 @@ def check_pka2xml():
             version_info = "Available (Binary found)"
         except Exception:
             pass
-            
+
     return {
-        "available": bool(pka_path), 
+        "available": bool(pka_path),
         "path": pka_path,
-        "details": version_info
+        "details": version_info,
     }
+
 
 # Import and include routers
 from app.routers import generate
+
 app.include_router(generate.router, prefix="/api")

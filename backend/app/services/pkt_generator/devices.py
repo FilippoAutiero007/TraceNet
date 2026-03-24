@@ -9,7 +9,6 @@ from typing import Any, Dict
 
 from app.services.pkt_generator import utils, layout
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,16 +21,6 @@ def clone_device(
 ) -> ET.Element:
     """
     Clone a device from a template and configure it.
-
-    Args:
-        template_device: The XML element to clone.
-        index:           Global index of the device (used for layout).
-        dev_config:      Configuration dict (name, type, ip, subnet, x, y, ...).
-        total_devices:   Total number of devices in the topology (for layout).
-        meta:            Device catalog metadata (e.g. max_ports, port_prefix).
-
-    Returns:
-        ET.Element: The fully configured device XML element.
     """
     if meta is None:
         meta = {}
@@ -50,14 +39,12 @@ def clone_device(
     # Update the EXISTING <SAVE_REF_ID> tag from the template.
     saveref = utils.rand_saveref()
     utils.set_text(engine, "SAVE_REF_ID", saveref, create=True)
-    # Solo se il template aveva giÃ  il tag senza underscore
     legacy = engine.find("SAVEREFID")
     if legacy is not None:
         legacy.text = saveref
     dev_config["_saveref"] = saveref
 
     # ── Normalize device type ─────────────────────────────────────────────────
-    # Handles compound names like "router-8port", "switch-24port", "pc-desktop".
     raw_type = str(dev_config.get("type", "generic")).strip().lower()
     if "router" in raw_type:
         dev_type = "router"
@@ -69,14 +56,11 @@ def clone_device(
         dev_type = "pc"
 
     # ── Realistic hardware serial (required by PT 8.2.2) ─────────────────────
-    # PT marks the file as "Incompatible version" without a realistic serial.
     serial = utils.rand_realistic_serial(dev_type)
     for serial_elem in new_device.iterfind(".//SERIAL"):
         serial_elem.text = serial
 
-    # ── Unique realistic MAC addresses (hex12, as per PT 8.2.2 manual) ───────
-    # Each interface gets a dynamically generated MAC — no hardcoded pool,
-    # so the topology scales to any number of devices without collisions.
+    # ── Unique realistic MAC addresses ────────────────────────────────────────
     mac_count = 0
     for container in new_device.iter():
         mac_elem = container.find("MACADDRESS")
@@ -108,23 +92,33 @@ def clone_device(
     if x == -1 or y == -1:
         x, y = layout.calculate_device_coordinates(index, total_devices)
 
-    # Update the EXISTING <COORD_SETTINGS> in the template (underscore names).
-    # Do NOT create <COORDSETTINGS> / <XCOORD> / <YCOORD>.
     utils.set_coords(engine, x, y)
 
-    # Mirror coordinates in WORKSPACE/LOGICAL and assign unique memory addresses.
     workspace = new_device.find("WORKSPACE")
     if workspace is not None:
         logical = workspace.find("LOGICAL")
         if logical is not None:
-            utils.set_text(logical, "X",        str(x),                create=True)
-            utils.set_text(logical, "Y",        str(y),                create=True)
-            utils.set_text(logical, "DEV_ADDR", utils.rand_memaddr(),  create=True)
-            utils.set_text(logical, "MEM_ADDR", utils.rand_memaddr(),  create=True)
+            utils.set_text(logical, "X",        str(x),              create=True)
+            utils.set_text(logical, "Y",        str(y),              create=True)
+            utils.set_text(logical, "DEV_ADDR", utils.rand_memaddr(), create=True)
+            utils.set_text(logical, "MEM_ADDR", utils.rand_memaddr(), create=True)
 
     # ── IP Configuration ──────────────────────────────────────────────────────
+    is_pc = dev_type == "pc"
+    dhcp_mode = str(dev_config.get("dhcp_mode", "")).lower() if is_pc else ""
+
     if "ip" in dev_config:
-        _configure_ip(engine, dev_config)
+        if not is_pc:
+            _configure_ip(engine, dev_config)
+        else:
+            if dhcp_mode == "static":
+                _configure_ip(engine, dev_config)
+            else:
+                # DHCP: nessun IP statico sulla porta
+                pass
+
+    if is_pc and dhcp_mode == "dhcp":
+        _set_pc_dhcp_mode(engine, dev_config)
 
     return new_device
 
@@ -139,7 +133,6 @@ def _configure_ip(engine: ET.Element, dev_config: Dict[str, Any]) -> None:
     if not slots:
         return
 
-    # Slot 0 holds the built-in ports (Fa0/0, Fa0/1, etc.).
     slot_module = slots[0].find("MODULE")
     if slot_module is None:
         return
@@ -148,11 +141,66 @@ def _configure_ip(engine: ET.Element, dev_config: Dict[str, Any]) -> None:
     if port is None:
         return
 
-    ip     = str(dev_config.get("ip",     ""))
+    ip = str(dev_config.get("ip", ""))
     subnet = str(dev_config.get("subnet", "255.255.255.0"))
 
     if ip:
-        utils.set_text(port, "IP",       ip,      create=True)
-        utils.set_text(port, "SUBNET",   subnet,  create=True)
-        utils.set_text(port, "POWER",    "true",  create=True)
-        utils.set_text(port, "UPMETHOD", "3",     create=True)  # 3 = Static
+        utils.set_text(port, "IP",      ip,     create=True)
+        utils.set_text(port, "SUBNET",  subnet, create=True)
+        utils.set_text(port, "POWER",   "true", create=True)
+        utils.set_text(port, "UPMETHOD","3",    create=True)  # 3 = Static
+
+
+def _set_pc_dhcp_mode(engine: ET.Element, dev_config: Dict[str, Any]) -> None:
+    """
+    Imposta la porta principale del PC in modalità DHCP,
+    replicando i tag visti nel dump XML di Packet Tracer.
+    """
+    module = engine.find("MODULE")
+    if module is None:
+        return
+
+    slots = module.findall("SLOT")
+    if not slots:
+        return
+
+    slot_module = slots[0].find("MODULE")
+    if slot_module is None:
+        return
+
+    port = slot_module.find("PORT")
+    if port is None:
+        return
+
+    # UP_METHOD = 1 (DHCP client in PT)
+    upm = port.find("UP_METHOD")
+    if upm is None:
+        upm = ET.SubElement(port, "UP_METHOD")
+    upm.text = "1"
+
+    # Abilita DHCP sulla porta
+    dhcp_en = port.find("PORT_DHCP_ENABLE")
+    if dhcp_en is None:
+        dhcp_en = ET.SubElement(port, "PORT_DHCP_ENABLE")
+    dhcp_en.text = "true"
+
+    # DHCP server IP (se fornito)
+    dhcp_server_ip = str(dev_config.get("dhcp_server_ip", "")).strip()
+    if dhcp_server_ip:
+        ds = port.find("DHCP_SERVER_IP")
+        if ds is None:
+            ds = ET.SubElement(port, "DHCP_SERVER_IP")
+        ds.text = dhcp_server_ip
+
+        pdns = port.find("PORT_DNS")
+        if pdns is None:
+            pdns = ET.SubElement(port, "PORT_DNS")
+        pdns.text = dhcp_server_ip
+
+    # GATEWAY globale del PC (gateway della LAN)
+    gateway_ip = str(dev_config.get("gateway_ip", "")).strip()
+    if gateway_ip:
+        gw = engine.find("GATEWAY")
+        if gw is None:
+            gw = ET.SubElement(engine, "GATEWAY")
+        gw.text = gateway_ip

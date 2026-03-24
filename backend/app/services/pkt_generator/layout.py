@@ -96,9 +96,11 @@ def apply_hierarchical_layout(
             layout_fn = get_layout_dispatcher()["generic_hierarchical"]
         layout_fn(pos, routers, switches, endpoints, adjacency, params)
 
-    # Per gli scenari generici manteniamo la vecchia logica di overlap+centering
+    # Per gli scenari generici manteniamo la vecchia logica di overlap+centering.
+    # Evitiamo lo spostamento "a caso" dei client nei backbone multi-router.
     if scenario not in ("lan_with_services_layers", "one_switch_multiple_vlan"):
-        resolve_overlaps(pos)
+        if scenario != "multi_router_backbone":
+            resolve_overlaps(pos)
         center_layout(pos, params)
 
     fallback_x, fallback_y = params.base_x, params.base_y + 2 * params.dy_layer

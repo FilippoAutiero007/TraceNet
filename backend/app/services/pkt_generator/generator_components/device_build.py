@@ -17,6 +17,63 @@ from app.services.pkt_generator.server_config import write_dns_records
 from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_name, rand_saveref
 
 
+def _find_primary_port(engine: ET.Element) -> Optional[ET.Element]:
+    """
+    Return the primary wired port for end-devices (PC/Server/Laptop templates).
+
+    Packet Tracer templates usually store the main NIC under:
+    ENGINE/MODULE/SLOT[0]/MODULE/PORT
+    """
+    module = engine.find("MODULE")
+    if module is None:
+        return None
+    slots = module.findall("SLOT")
+    if not slots:
+        return None
+    slot_module = slots[0].find("MODULE")
+    if slot_module is None:
+        return None
+    return slot_module.find("PORT")
+
+
+def _configure_end_device_dhcp(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
+    """
+    Configure an end-device as a DHCP client (sets the UI radio button in PT).
+
+    Derived from PT dumps (e.g. pc_dhcp_after.xml):
+    - PORT/UP_METHOD = 1
+    - PORT/PORT_DHCP_ENABLE = true
+    - ENGINE/GATEWAY contains the LAN gateway (optional but typical)
+    """
+    port = _find_primary_port(engine)
+    if port is None:
+        return
+
+    # DHCP radio-button state (PT 8.2.2)
+    set_text(port, "UP_METHOD", "1", create=True)
+    set_text(port, "PORT_DHCP_ENABLE", "true", create=True)
+
+    # Clear any static residue to avoid ambiguous states.
+    for tag in ("IP", "SUBNET", "PORT_GATEWAY"):
+        set_text(port, tag, "", create=True)
+
+    gateway_ip = str(dev_cfg.get("gateway_ip", "")).strip()
+    if gateway_ip:
+        set_text(engine, "GATEWAY", gateway_ip, create=True)
+
+    # Only write DHCP server / DNS when explicitly known.
+    dhcp_server_ip = str(dev_cfg.get("dhcp_server_ip", "")).strip()
+    if dhcp_server_ip:
+        set_text(port, "DHCP_SERVER_IP", dhcp_server_ip, create=True)
+        # Packet Tracer dumps often mirror this into PORT_DNS for the PC.
+        set_text(port, "PORT_DNS", dhcp_server_ip, create=True)
+
+        dns_client = engine.find("DNS_CLIENT")
+        if dns_client is None:
+            dns_client = ET.SubElement(engine, "DNS_CLIENT")
+        set_text(dns_client, "SERVER_IP", dhcp_server_ip, create=True)
+
+
 def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
     """Scrive gli IP di tutte le interfacce configurate nei rispettivi slot."""
     module = engine.find("MODULE")
@@ -137,6 +194,7 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
         return
 
     cfg = generate_server_config(dev_cfg)
+
     # HTTP / HTTPS
     http = engine.find("HTTP_SERVER")
     if http is not None and "http" in cfg:
@@ -152,28 +210,27 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
         if cfg["dns"]:
             write_dns_records(engine, dev_cfg)
 
-    # DHCP Server
+    # DHCP
     if cfg.get("dhcp"):
         from app.services.pkt_generator.server_config import write_dhcp_config
-
         write_dhcp_config(engine, dev_cfg)
 
     # FTP
     if "ftp" in cfg:
-        ftp = engine.find("FTP_SERVER") or ET.SubElement(engine, "FTP_SERVER")
+        ftp = engine.find("FTP_SERVER")
+        if ftp is None:
+            ftp = ET.SubElement(engine, "FTP_SERVER")
         set_text(ftp, "ENABLED", "1" if cfg["ftp"] else "0", create=True)
         if cfg["ftp"]:
-            mgr = ftp.find("USER_ACCOUNT_MNGR") or ET.SubElement(ftp, "USER_ACCOUNT_MNGR")
-            mgr.clear()
-            acct = ET.SubElement(mgr, "ACCOUNT")
-            set_text(acct, "USERNAME", str(cfg.get("ftp_user") or "cisco"), create=True)
-            set_text(acct, "PASSWORD", str(cfg.get("ftp_password") or "cisco"), create=True)
-            set_text(acct, "PERMISSIONS", "RWDNL", create=True)
+            from app.services.pkt_generator.server_config import write_ftp_users
+            write_ftp_users(engine, dev_cfg)
 
-    # SMTP / POP3 (Packet Tracer uses EMAIL_SERVER with simple flags)
+    # SMTP / POP3
     wants_email = bool(cfg.get("smtp") or cfg.get("pop3"))
     if wants_email:
-        email = engine.find("EMAIL_SERVER") or ET.SubElement(engine, "EMAIL_SERVER")
+        email = engine.find("EMAIL_SERVER")
+        if email is None:
+            email = ET.SubElement(engine, "EMAIL_SERVER")
         set_text(email, "SMTP_ENABLED", "1" if cfg.get("smtp") else "0", create=True)
         set_text(email, "POP3_ENABLED", "1" if cfg.get("pop3") else "0", create=True)
         if cfg.get("smtp"):
@@ -314,8 +371,18 @@ def build_device(
             used_mem_addrs.add(mem_addr)
             set_text(logical, "MEM_ADDR", mem_addr, create=True)
 
-    if dev_cfg.get("ip") or dev_cfg.get("dhcp_client") or dev_cfg.get("interfaces"):
-        _update_device_ip(engine, dev_cfg)
+    is_dhcp = bool(dev_cfg.get("dhcp_client")) or str(dev_cfg.get("dhcp_mode", "")).strip().lower() == "dhcp"
+
+    if dev_cfg.get("ip") or dev_cfg.get("dhcp_client") or dev_cfg.get("interfaces") or is_dhcp:
+        category_lower = (device_meta.get("category") or resolved_type or "").lower()
+        is_router = "router" in category_lower
+        is_switch = "switch" in category_lower
+
+        # DHCP client mode for end-devices (PC/Server/Laptop).
+        if (not is_router and not is_switch) and is_dhcp:
+            _configure_end_device_dhcp(engine, dev_cfg)
+        else:
+            _update_device_ip(engine, dev_cfg)
 
     category = (device_meta.get("category") or resolved_type or "").lower()
     if "router" in category:

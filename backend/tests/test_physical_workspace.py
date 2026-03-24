@@ -5,7 +5,8 @@ sys.path.insert(0, ".")
 from app.services.pkt_crypto import decrypt_pkt_data
 from app.services.pkt_generator.generator import PKTGenerator
 
-TEMPLATE = Path("backend/templates/Router/router_2port.pkt")
+# Resolve templates relative to repo root regardless of current working directory.
+TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "Router" / "router_2port.pkt"
 
 def extract_physicalworkspace(xml: str) -> str:
     start = xml.index("<PHYSICALWORKSPACE>")
