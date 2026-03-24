@@ -566,6 +566,7 @@ def generate_server_config(dev_cfg: dict[str, Any]) -> dict[str, Any]:
         "ftp": "ftp" in services,
         "smtp": "smtp" in services,
         "pop3": "pop3" in services,
+        "dns_records": dev_cfg.get("dns_records", []),
         # Optional service parameters (best-effort defaults).
         "ftp_user": str(dev_cfg.get("ftp_user", "cisco")),
         "ftp_password": str(dev_cfg.get("ftp_password", "cisco")),

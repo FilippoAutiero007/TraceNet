@@ -199,6 +199,7 @@ class ServerConfig(BaseModel):
     ftp_user: Optional[str] = Field(default=None)
     ftp_password: Optional[str] = Field(default=None)
     ftp_users: Optional[list] = Field(default=None)
+    dns_records: Optional[list] = Field(default=None)
 
 
 

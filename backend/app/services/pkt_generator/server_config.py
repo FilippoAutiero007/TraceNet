@@ -63,6 +63,8 @@ def build_server_configs(
 
         dev["server_services"] = services
         dev["hostname"] = hostname
+        if raw_cfg.get("dns_records"):
+            dev["dns_records"] = raw_cfg["dns_records"]
 
     dns_server: dict | None = None
     for _idx, dev in servers:
@@ -72,6 +74,8 @@ def build_server_configs(
             break
 
     if dns_server is None:
+        return
+    if isinstance(dns_server.get("dns_records"), list):
         return
 
     dns_records: list[dict[str, str]] = []
@@ -97,25 +101,20 @@ def write_dns_records(engine: ET.Element, dev_cfg: dict) -> None:
     """
     Scrive i record DNS nel tag ENGINE/DNS_SERVER/NAMESERVER-DATABASE del server PT.
 
-    Struttura XML corretta (verificata da PT 8.2.2):
+    Struttura XML attesa da PT 8.2.2:
     <DNS_SERVER>
       <ENABLED>1</ENABLED>
       <NAMESERVER-DATABASE>
-        <RESOURCE-RECORD>
-          <TYPE>A-REC</TYPE>
-          <NAME>web</NAME>
-          <TTL>86400</TTL>
-          <IPADDRESS>192.168.1.3</IPADDRESS>
-        </RESOURCE-RECORD>
+        <A_RECORD>
+          <DOMAIN_NAME>web.local</DOMAIN_NAME>
+          <DETAIL>192.168.1.3</DETAIL>
+        </A_RECORD>
       </NAMESERVER-DATABASE>
     </DNS_SERVER>
 
     dev_cfg["dns_records"] = [{"hostname": "web.local", "ip": "192.168.1.3"}]
     """
     records = dev_cfg.get("dns_records")
-    if not isinstance(records, list):
-        return
-
     dns = engine.find("DNS_SERVER")
     if dns is None:
         return
@@ -125,6 +124,9 @@ def write_dns_records(engine: ET.Element, dev_cfg: dict) -> None:
         db = ET.SubElement(dns, "NAMESERVER-DATABASE")
     db.clear()
 
+    if not isinstance(records, list) or not records:
+        return
+
     for rec in records:
         if not isinstance(rec, dict):
             continue
@@ -132,14 +134,9 @@ def write_dns_records(engine: ET.Element, dev_cfg: dict) -> None:
         ip = str(rec.get("ip", "")).strip()
         if not hostname or not ip:
             continue
-        # PT usa solo il nome host senza dominio (es. "web" non "web.local")
-        name = hostname.split(".")[0] if "." in hostname else hostname
-
-        rr = ET.SubElement(db, "RESOURCE-RECORD")
-        ET.SubElement(rr, "TYPE").text = "A-REC"
-        ET.SubElement(rr, "NAME").text = name
-        ET.SubElement(rr, "TTL").text = "86400"
-        ET.SubElement(rr, "IPADDRESS").text = ip
+        rr = ET.SubElement(db, "A_RECORD")
+        ET.SubElement(rr, "DOMAIN_NAME").text = hostname
+        ET.SubElement(rr, "DETAIL").text = ip
 def write_dhcp_config(engine: ET.Element, dev_cfg: dict) -> None:
     """
     Configura il DHCP server nel tag ENGINE/DHCP_SERVERS del server PT.
