@@ -324,31 +324,54 @@ def layout_lan_with_services_layers(
     adjacency: dict[str, list[str]],
     params: LayoutParams,
 ) -> None:
+    # Riga 1: router in cima al centro
     set_row(pos, routers, params.base_x, params.base_y, params.dx_router)
-    set_row(pos, firewalls, params.base_x, params.base_y + params.dy_layer, params.dx_switch - 40)
-    dmz_servers = [s for s in servers if "dmz" in s.lower()]
-    internal_servers = [s for s in servers if s not in dmz_servers]
-    set_row(pos, dmz_servers, params.base_x, params.base_y + params.dy_layer + 90, params.dx_host)
 
-    # Switch più vicino al router se non ci sono firewall
+    # Riga 2: firewall (se presenti)
+    set_row(pos, firewalls, params.base_x, params.base_y + params.dy_layer, params.dx_switch - 40)
+
+    # Riga 3: switch
     switch_gap = params.dy_layer if firewalls else params.dy_layer // 2
     switch_y = params.base_y + switch_gap + 40
     set_row(pos, switches, params.base_x, switch_y, params.dx_switch)
 
-    # Server interni a fianco dei PC, vicino allo switch
-    if switches:
-        sw_x, _ = pos.get(switches[0], (params.base_x, switch_y))
-    else:
-        sw_x = params.base_x
+    sw_x = pos.get(switches[0], (params.base_x, switch_y))[0] if switches else params.base_x
+
+    # Riga 4: server interni centrati rispetto allo switch
+    server_y = switch_y + params.dy_layer
+    dmz_servers = [s for s in servers if "dmz" in s.lower()]
+    internal_servers = [s for s in servers if s not in dmz_servers]
+
+    # DMZ server sulla sinistra (vicino al firewall)
+    set_row(pos, dmz_servers, params.base_x, params.base_y + params.dy_layer + 90, params.dx_host)
+
+    # Server interni: spaziatura larga per evitare cavi sovrapposti
+    srv_spacing = max(params.dx_host * 1.5, 180)
+    total_srv = len(internal_servers)
     for idx, srv in enumerate(internal_servers):
-        pos[srv] = (
-            sw_x + params.dx_host * (idx + 1),
-            switch_y + params.dy_layer,
-        )
+        x = sw_x + (idx - (total_srv - 1) / 2.0) * srv_spacing
+        pos[srv] = (x, server_y)
 
+    # Riga 5: PC con gap verticale doppio (salta la riga server)
+    # + offset orizzontale di metà dx_host per disallineare i cavi dai server
+    pc_only = [h for h in endpoints if h not in servers]
+    grouped = hosts_by_parent(pc_only, switches, adjacency)
+    assign_hosts_under_switches(
+        pos,
+        grouped,
+        switch_y,
+        params,
+        host_base_layer_gap=params.dy_layer * 2 + 20,
+    )
 
-    grouped = hosts_by_parent([h for h in endpoints if h not in servers], switches, adjacency)
-    assign_hosts_under_switches(pos, grouped, switch_y, params)
+    # Sposta tutti i PC di dx_host/2 a destra:
+    # così nessun cavo PC→Switch è parallelo/sovrapposto a un cavo Server→Switch
+    pc_set = set(pc_only)
+    for name in pc_set:
+        if name in pos:
+            px, py = pos[name]
+            # Offset maggiore per disallineare da tutti i server (Server0, 1, 2)
+            pos[name] = (px + params.dx_host * 0.8, py)
 
 
 def layout_one_switch_multiple_vlan(

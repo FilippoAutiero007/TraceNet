@@ -58,15 +58,32 @@ def build_server_configs(
         raw_cfg = servers_config_list[idx] if idx < len(servers_config_list) and isinstance(servers_config_list[idx], dict) else {}
         services = _normalize_services(raw_cfg.get("services"))
         if not services:
-            services = global_services
-        hostname = _normalize_hostname(raw_cfg.get("hostname")) or f"server{idx}.local"
+                services = []
+        hostname = _normalize_hostname(raw_cfg.get("hostname"))
+        if not hostname:
+            if "dns" in services:
+                hostname = f"dns{idx+1}.local"
+            elif "http" in services or "web" in services:
+                hostname = f"web{idx+1}.local"
+            elif "ftp" in services:
+                hostname = f"ftp{idx+1}.local"
+            else:
+                hostname = f"server{idx}.local"
 
         dev["server_services"] = services
         dev["hostname"] = hostname
         if raw_cfg.get("dns_records"):
             dev["dns_records"] = raw_cfg["dns_records"]
+        if raw_cfg.get("auto_dns_records"):
+            dev["auto_dns_records"] = raw_cfg["auto_dns_records"]
+        if raw_cfg.get("ftp_users"):
+            dev["ftp_users"] = raw_cfg["ftp_users"]
+        if raw_cfg.get("ftp_user"):
+            dev["ftp_user"] = raw_cfg["ftp_user"]
+        if raw_cfg.get("ftp_password"):
+            dev["ftp_password"] = raw_cfg["ftp_password"]
 
-    dns_server: dict | None = None
+        dns_server: dict | None = None
     for _idx, dev in servers:
         services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
         if "dns" in services:
@@ -75,27 +92,45 @@ def build_server_configs(
 
     if dns_server is None:
         return
-    if isinstance(dns_server.get("dns_records"), list):
-        return
+    # Se l'utente ha già specificato dns_records → rispetta la sua scelta, niente auto-generazione
+    if isinstance(dns_server.get("dns_records"), list) and not dns_server.get("auto_dns_records"):
+                return
+        
+    SERVICE_PREFIX = {
+        "http": "web", "web": "web", "ftp": "ftp",
+        "smtp": "mail", "email": "mail", "ntp": "ntp",
+        "syslog": "syslog", "tftp": "tftp",
+        "aaa": "aaa", "radius": "radius",
+    }
+    EXCLUDED = {"dhcp", "dhcpv6", "dns"}
 
     dns_records: list[dict[str, str]] = []
+    counters: dict[str, int] = {}
     seen: set[tuple[str, str]] = set()
     for _idx, dev in servers:
         services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
-        if "http" not in services:
-            continue
-        hostname = str(dev.get("hostname", "")).strip()
         ip = str(dev.get("ip", "")).strip()
-        if not hostname or not ip:
+        if not ip:
             continue
-        key = (hostname, ip)
-        if key in seen:
-            continue
-        seen.add(key)
-        dns_records.append({"hostname": hostname, "ip": ip})
+        for svc in services:
+            if svc in EXCLUDED:
+                continue
+            prefix = SERVICE_PREFIX.get(svc, svc)
+            counters[prefix] = counters.get(prefix, 0) + 1
+            hostname = f"{prefix}{counters[prefix]}"
+            key = (hostname, ip)
+            if key in seen:
+                continue
+            seen.add(key)
+            dns_records.append({"hostname": hostname, "ip": ip})
 
-    dns_server["dns_records"] = dns_records
-
+    if dns_records:
+        existing = dns_server.get("dns_records") or []
+        existing_hostnames = {r.get("hostname") for r in existing if isinstance(r, dict)}
+        for r in dns_records:
+            if r.get("hostname") not in existing_hostnames:
+                existing.append(r)
+        dns_server["dns_records"] = existing
 
 def write_dns_records(engine: ET.Element, dev_cfg: dict) -> None:
     """
@@ -130,17 +165,19 @@ def write_dns_records(engine: ET.Element, dev_cfg: dict) -> None:
     for rec in records:
         if not isinstance(rec, dict):
             continue
-        hostname = str(rec.get("hostname", "")).strip()
+        hostname = str(rec.get("hostname") or rec.get("name", "")).strip()
         ip = str(rec.get("ip", "")).strip()
         if not hostname or not ip:
             continue
-        rr = ET.SubElement(db, "A_RECORD")
-        ET.SubElement(rr, "DOMAIN_NAME").text = hostname
-        ET.SubElement(rr, "DETAIL").text = ip
+        rr = ET.SubElement(db, "RESOURCE-RECORD")
+        ET.SubElement(rr, "TYPE").text = "A-REC"
+        ET.SubElement(rr, "NAME").text = hostname
+        ET.SubElement(rr, "TTL").text = "86400"
+        ET.SubElement(rr, "IPADDRESS").text = ip
 def write_dhcp_config(engine: ET.Element, dev_cfg: dict) -> None:
     """
     Configura il DHCP server nel tag ENGINE/DHCP_SERVERS del server PT.
-    
+
     Struttura XML attesa da PT 8.2.2 (verificata):
     <DHCP_SERVERS>
       <ASSOCIATED_PORTS>
@@ -174,34 +211,35 @@ def write_dhcp_config(engine: ET.Element, dev_cfg: dict) -> None:
     """
     import ipaddress
 
+    services = {str(s).strip().lower() for s in (dev_cfg.get("server_services") or [])}
+    if "dhcp" not in services:
+        return
+
     dhcp_servers = engine.find("DHCP_SERVERS")
     if dhcp_servers is None:
         return
 
-    # Calcola i parametri del pool dalla subnet del server
-    gateway = str(dev_cfg.get("gateway_ip", "0.0.0.0")).strip()
-    mask = str(dev_cfg.get("subnet", "255.255.255.0")).strip()
-    server_ip = str(dev_cfg.get("ip", "0.0.0.0")).strip()
-    dns_ip = dev_cfg.get("dhcp_dns", server_ip)  # usa il server stesso come DNS default
+    gateway    = str(dev_cfg.get("gateway_ip", "0.0.0.0")).strip()
+    mask       = str(dev_cfg.get("subnet",     "255.255.255.0")).strip()
+    server_ip  = str(dev_cfg.get("ip",         "0.0.0.0")).strip()
+    dns_ip     = dev_cfg.get("dhcp_dns", server_ip)
 
     try:
-        net = ipaddress.IPv4Network(f"{gateway}/{mask}", strict=False)
-        hosts = list(net.hosts())
-        # Riserva i primi 5 IP (gateway, server, ecc.)
-        start_ip = str(hosts[5]) if len(hosts) > 5 else str(hosts[0])
-        end_ip = str(hosts[-1])
+        net       = ipaddress.IPv4Network(f"{gateway}/{mask}", strict=False)
+        hosts     = list(net.hosts())
+        start_ip  = str(hosts[5]) if len(hosts) > 5 else str(hosts[0])
+        end_ip    = str(hosts[-1])
         network_addr = str(net.network_address)
     except Exception:
         network_addr = "0.0.0.0"
-        start_ip = "0.0.0.0"
-        end_ip = "0.0.0.0"
+        start_ip     = "0.0.0.0"
+        end_ip       = "0.0.0.0"
 
     for ap in dhcp_servers.findall("ASSOCIATED_PORTS/ASSOCIATED_PORT"):
         dhcp_server = ap.find("DHCP_SERVER")
         if dhcp_server is None:
             continue
-        
-        # Abilita DHCP
+
         enabled = dhcp_server.find("ENABLED")
         if enabled is None:
             enabled = ET.SubElement(dhcp_server, "ENABLED")
@@ -214,24 +252,109 @@ def write_dhcp_config(engine: ET.Element, dev_cfg: dict) -> None:
         if pool is None:
             pool = ET.SubElement(pools, "POOL")
 
-        def _st(tag, val):
+        def _st(tag: str, val: str) -> None:
             elem = pool.find(tag)
             if elem is None:
                 elem = ET.SubElement(pool, tag)
             elem.text = val
 
-        _st("NAME", "serverPool")
-        _st("NETWORK", network_addr)
-        _st("MASK", mask)
+        _st("NAME",           "serverPool")
+        _st("NETWORK",        network_addr)
+        _st("MASK",           mask)
         _st("DEFAULT_ROUTER", gateway)
-        _st("TFTP_ADDRESS", "0.0.0.0")
-        _st("START_IP", start_ip)
-        _st("END_IP", end_ip)
-        _st("DNS_SERVER", str(dns_ip))
-        _st("MAX_USERS", "512")
-        _st("LEASE_TIME", "86400000")
-        _st("WLC_ADDRESS", "0.0.0.0")
-        _st("DOMAIN_NAME", "")
+        _st("TFTP_ADDRESS",   "0.0.0.0")
+        _st("START_IP",       start_ip)
+        _st("END_IP",         end_ip)
+        _st("DNS_SERVER",     str(dns_ip))
+        _st("MAX_USERS",      "512")
+        _st("LEASE_TIME",     "86400000")
+        _st("WLC_ADDRESS",    "0.0.0.0")
+        _st("DOMAIN_NAME",    "")
 
+def write_ftp_users(engine: ET.Element, dev_cfg: dict) -> None:
+    """
+    Scrive utenti FTP nel tag ENGINE/FTP_SERVER/USERS e USER_ACCOUNT_MNGR.
+    - Mantiene sempre l'utente default cisco/cisco con tutti i permessi.
+    - Utenti custom da dev_cfg["ftp_users"].
+    """
+    services = {str(s).strip().lower() for s in (dev_cfg.get("server_services") or [])}
+    if "ftp" not in services:
+        return
 
+    ftp = engine.find("FTP_SERVER")
+    if ftp is None:
+        return
 
+    enabled = ftp.find("ENABLED")
+    if enabled is None:
+        enabled = ET.SubElement(ftp, "ENABLED")
+    enabled.text = "1"
+
+    users_node = ftp.find("USERS")
+    if users_node is None:
+        users_node = ET.SubElement(ftp, "USERS")
+
+    # Utente default cisco sempre presente
+    default_cisco = {
+        "username": "cisco",
+        "password": "cisco",
+        "read": 1, "write": 1, "delete": 1, "rename": 1, "list": 1,
+    }
+
+    users_to_write: list[dict] = [default_cisco]
+    custom_users = dev_cfg.get("ftp_users")
+
+    if isinstance(custom_users, list):
+        counter = 1
+        for u in custom_users:
+            if not isinstance(u, dict):
+                continue
+            username = str(u.get("username") or "").strip()
+            if not username:
+                username = f"user{counter}"
+            counter += 1
+            password = str(u.get("password") or "1234").strip()
+            perms = str(u.get("permissions") or "rw").strip().lower()
+            read   = 1 if "r" in perms else 0
+            write  = 1 if "w" in perms else 0
+            entry = {
+                "username": username,
+                "password": password,
+                "read":   read,
+                "write":  write,
+                "delete": write,
+                "rename": write,
+                "list":   1,
+            }
+            # Se stesso username di cisco → sovrascrive, altrimenti aggiunge
+            users_to_write = [x for x in users_to_write if x["username"] != username]
+            users_to_write.append(entry)
+
+    # Scrivi nodo USERS
+    users_node.clear()
+    for u in users_to_write:
+        user_node = ET.SubElement(users_node, "USER")
+        ET.SubElement(user_node, "USERNAME").text  = u["username"]
+        ET.SubElement(user_node, "PASSWORD").text  = u["password"]
+        ET.SubElement(user_node, "WRITE").text     = str(u["write"])
+        ET.SubElement(user_node, "READ").text      = str(u["read"])
+        ET.SubElement(user_node, "DELETE").text    = str(u["delete"])
+        ET.SubElement(user_node, "RENAME").text    = str(u["rename"])
+        ET.SubElement(user_node, "LIST").text      = str(u["list"])
+
+    # USER_ACCOUNT_MNGR: usato da PT per mostrare utenti nella GUI
+    acct_mgr = ftp.find("USER_ACCOUNT_MNGR")
+    if acct_mgr is None:
+        acct_mgr = ET.SubElement(ftp, "USER_ACCOUNT_MNGR")
+    acct_mgr.clear()
+    for u in users_to_write:
+        acct = ET.SubElement(acct_mgr, "ACCOUNT")
+        ET.SubElement(acct, "USERNAME").text = u["username"]
+        ET.SubElement(acct, "PASSWORD").text = u["password"]
+        perms_str = ""
+        if u["write"]:  perms_str += "W"
+        if u["read"]:   perms_str += "R"
+        if u["delete"]: perms_str += "D"
+        if u["rename"]: perms_str += "N"
+        if u["list"]:   perms_str += "L"
+        ET.SubElement(acct, "PERMISSIONS").text = perms_str

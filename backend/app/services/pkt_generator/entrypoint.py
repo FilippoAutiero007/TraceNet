@@ -301,7 +301,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             name = safe_name("Server", srv_idx)
             switch = link_to_switch.get(name)
             seg = switch_to_lan.get(switch) if switch else (lan_segments[srv_idx % len(lan_segments)] if lan_segments else None)
-            srv_cfg: dict[str, Any] = {"name": name, "type": "server", "server_services": server_services}
+            srv_cfg: dict[str, Any] = {"name": name, "type": "server"}
             if seg is not None:
                 ip = _alloc_ip(seg)
                 if ip:
@@ -322,6 +322,16 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             devices_config=devices_config,
         )
 
+
+        # Inject dns_records from root config into the DNS server device
+        _root_dns_records = config.get("dns_records") or []
+        if _root_dns_records:
+            for _dev in devices_config:
+                if str(_dev.get("type", "")).lower() == "server":
+                    _svc = {str(s).lower() for s in (_dev.get("server_services") or [])}
+                    if "dns" in _svc and not _dev.get("dns_records"):
+                        _dev["dns_records"] = _root_dns_records
+                        break
         # Prepara i dhcp_pools per i server DHCP (per ora: un pool per la LAN principale del server).
         for d in devices_config:
             if str(d.get("type", "")).lower() != "server":
