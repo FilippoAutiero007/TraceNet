@@ -151,6 +151,8 @@ def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
             gateway = iface.get("gateway_ip") or dev_cfg.get("gateway_ip", "")
             if gateway and str(iface.get("role","")) == "lan":
                 set_text(port, "PORT_GATEWAY", str(gateway), create=True)
+                set_text(engine, "GATEWAY", str(gateway), create=True)
+                set_text(engine, "GATEWAY", str(gateway), create=True)
     else:
         # Fallback: usa ip/subnet dal dev_cfg sul primo slot
         ip = str(dev_cfg.get("ip", "")).strip()
@@ -170,6 +172,8 @@ def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
         gateway = dev_cfg.get("gateway_ip", "")
         if gateway:
             set_text(port, "PORT_GATEWAY", str(gateway), create=True)
+            set_text(engine, "GATEWAY", str(gateway), create=True)
+            set_text(engine, "GATEWAY", str(gateway), create=True)
 
 
 def _write_running_config_lines(running: ET.Element, commands: list[str]) -> None:
@@ -205,6 +209,10 @@ def _ensure_router_running_config(
         topology=topology,
     )
     _write_running_config_lines(running, commands)
+    # PT carica STARTUPCONFIG al boot ? deve essere identica a RUNNINGCONFIG
+    startup = engine.find("STARTUPCONFIG")
+    if startup is not None:
+        _write_running_config_lines(startup, commands)
 
 
 def _ensure_switch_running_config(engine: ET.Element, dev_cfg: dict[str, Any] | None = None) -> None:

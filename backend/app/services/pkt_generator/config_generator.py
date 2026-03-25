@@ -295,6 +295,7 @@ def generate_router_config(
     commands: list[str] = ["!"]
     commands.append(f"hostname {name}")
     commands.append("no ip domain-lookup")
+    commands.append("ip routing")
     commands.append("!")
 
     # ACL definitions (best-effort, permissive schema)

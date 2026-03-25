@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
@@ -116,7 +116,7 @@ def build_server_configs(
         if raw_cfg.get("mail_domain"):
             dev["mail_domain"] = raw_cfg["mail_domain"]
 
-        dns_server: dict | None = None
+    dns_server: dict | None = None
     for _idx, dev in servers:
         services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
         if "dns" in services:
@@ -125,7 +125,7 @@ def build_server_configs(
 
     if dns_server is None:
         return
-    # Se l'utente ha già specificato dns_records → rispetta la sua scelta, niente auto-generazione
+    # Se l'utente ha giÃ  specificato dns_records â†’ rispetta la sua scelta, niente auto-generazione
     if isinstance(dns_server.get("dns_records"), list) and not dns_server.get("auto_dns_records"):
                 return
         
@@ -359,7 +359,7 @@ def write_ftp_users(engine: ET.Element, dev_cfg: dict) -> None:
                 "rename": write,
                 "list":   1,
             }
-            # Se stesso username di cisco → sovrascrive, altrimenti aggiunge
+            # Se stesso username di cisco â†’ sovrascrive, altrimenti aggiunge
             users_to_write = [x for x in users_to_write if x["username"] != username]
             users_to_write.append(entry)
 
