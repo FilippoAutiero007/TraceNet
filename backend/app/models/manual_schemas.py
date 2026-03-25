@@ -31,6 +31,8 @@ class ManualNetworkRequest(BaseModel):
         default=RoutingProtocol.STATIC,
         description="Routing protocol to use"
     )
+    server_services: Optional[List[str]] = Field(default=None, description="Services to enable on server (dns, http, dhcp, ftp...)")
+    dns_records: Optional[List[dict]] = Field(default=None, description="DNS A records for DNS server")
     topology: Optional[TopologyConfig] = Field(
         default=None,
         description="Optional topology hints for edge/backbone router links"

@@ -91,3 +91,15 @@ def check_pka2xml():
 from app.routers import generate
 
 app.include_router(generate.router, prefix="/api")
+
+
+
+
+
+
+
+
+
+
+
+

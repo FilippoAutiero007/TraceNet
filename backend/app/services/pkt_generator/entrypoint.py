@@ -369,13 +369,38 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             ]
 
         # Propaga dhcp_server_ip ai router per ip helper-address
+        # Solo ai router che NON sono nella stessa LAN del server DHCP
         for d in devices_config:
-            if d.get("type") == "server" and d.get("ip"):
-                svc = {str(s).lower() for s in (d.get("server_services") or [])}
-                if "dhcp" in svc:
-                    for r in routers_config:
-                        r["dhcp_server_ip"] = d["ip"]
-                    break
+            if str(d.get("type", "")).lower() != "server":
+                continue
+            svc = {str(s).lower() for s in (d.get("server_services") or [])}
+            if "dhcp" not in svc or not d.get("ip"):
+                continue
+            dhcp_srv_network = None
+            try:
+                import ipaddress as _ipa
+                dhcp_srv_network = str(_ipa.IPv4Network(
+                    str(d["ip"]) + "/" + str(d.get("subnet", "255.255.255.0")),
+                    strict=False).network_address)
+            except Exception:
+                pass
+            for r in routers_config:
+                same_lan = False
+                for iface in r.get("interfaces") or []:
+                    if str(iface.get("role", "")).lower() != "lan":
+                        continue
+                    try:
+                        r_net = str(_ipa.IPv4Network(
+                            str(iface["ip"]) + "/" + str(iface.get("mask", "255.255.255.0")),
+                            strict=False).network_address)
+                        if dhcp_srv_network and r_net == dhcp_srv_network:
+                            same_lan = True
+                            break
+                    except Exception:
+                        continue
+                if not same_lan:
+                    r["dhcp_server_ip"] = d["ip"]
+            break
 
         pc_idx = 0
         # Verifica se c'è un server DHCP dedicato tra i server già aggiunti

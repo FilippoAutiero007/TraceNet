@@ -335,9 +335,14 @@ def layout_lan_with_services_layers(
     switch_y = params.base_y + switch_gap + 40
     set_row(pos, switches, params.base_x, switch_y, params.dx_switch)
 
-    sw_x = pos.get(switches[0], (params.base_x, switch_y))[0] if switches else params.base_x
+    # sw_x: centro medio di tutti gli switch presenti
+    if switches:
+        sw_xs = [pos.get(sw, (params.base_x, switch_y))[0] for sw in switches]
+        sw_x = sum(sw_xs) / len(sw_xs)
+    else:
+        sw_x = params.base_x
 
-    # Riga 4: server interni centrati rispetto allo switch
+    # Riga 4: server interni centrati rispetto agli switch
     server_y = switch_y + params.dy_layer
     dmz_servers = [s for s in servers if "dmz" in s.lower()]
     internal_servers = [s for s in servers if s not in dmz_servers]
@@ -345,15 +350,14 @@ def layout_lan_with_services_layers(
     # DMZ server sulla sinistra (vicino al firewall)
     set_row(pos, dmz_servers, params.base_x, params.base_y + params.dy_layer + 90, params.dx_host)
 
-    # Server interni: spaziatura larga per evitare cavi sovrapposti
-    srv_spacing = max(params.dx_host * 1.5, 180)
+    # Server interni: spaziatura larga, offset +60 per evitare sovrapposizione cavi
+    srv_spacing = max(params.dx_host * 1.8, 220)
     total_srv = len(internal_servers)
     for idx, srv in enumerate(internal_servers):
-        x = sw_x + (idx - (total_srv - 1) / 2.0) * srv_spacing
+        x = sw_x + (idx - (total_srv - 1) / 2.0) * srv_spacing + 60
         pos[srv] = (x, server_y)
 
     # Riga 5: PC con gap verticale doppio (salta la riga server)
-    # + offset orizzontale di metà dx_host per disallineare i cavi dai server
     pc_only = [h for h in endpoints if h not in servers]
     grouped = hosts_by_parent(pc_only, switches, adjacency)
     assign_hosts_under_switches(
@@ -364,14 +368,12 @@ def layout_lan_with_services_layers(
         host_base_layer_gap=params.dy_layer * 2 + 20,
     )
 
-    # Sposta tutti i PC di dx_host/2 a destra:
-    # così nessun cavo PC→Switch è parallelo/sovrapposto a un cavo Server→Switch
+    # Offset orizzontale PC per disallineare cavi da quelli dei server
     pc_set = set(pc_only)
     for name in pc_set:
         if name in pos:
             px, py = pos[name]
-            # Offset maggiore per disallineare da tutti i server (Server0, 1, 2)
-            pos[name] = (px + params.dx_host * 0.8, py)
+            pos[name] = (px - params.dx_host * 0.6, py)
 
 
 def layout_one_switch_multiple_vlan(
