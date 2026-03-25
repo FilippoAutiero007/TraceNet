@@ -74,6 +74,36 @@ def _configure_end_device_dhcp(engine: ET.Element, dev_cfg: dict[str, Any]) -> N
         set_text(dns_client, "SERVER_IP", dhcp_server_ip, create=True)
 
 
+def _configure_email_client(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
+    username = str(dev_cfg.get("mail_username") or "").strip()
+    password = str(dev_cfg.get("mail_password") or "").strip()
+    mail_server_ip = str(dev_cfg.get("mail_server_ip") or "").strip()
+    mail_domain = str(dev_cfg.get("mail_domain") or "").strip() or "mail.local"
+    if not username or not password or not mail_server_ip:
+        return
+
+    email_client = engine.find("EMAIL_CLIENT")
+    if email_client is None:
+        email_client = ET.SubElement(engine, "EMAIL_CLIENT")
+
+    email_address = f"{username}@{mail_domain}"
+
+    set_text(email_client, "ENABLED", "1", create=True)
+    # Legacy/actual PT fields from templates.
+    set_text(email_client, "USER", username, create=True)
+    set_text(email_client, "PASSWORD", password, create=True)
+    set_text(email_client, "MAIL_ID", email_address, create=True)
+    set_text(email_client, "NAME", username, create=True)
+    set_text(email_client, "POP3_SERVER", mail_server_ip, create=True)
+    set_text(email_client, "SMTP_SERVER", mail_server_ip, create=True)
+
+    # Requested field names (explicitly created for PT 8.2.2 compatibility checks).
+    set_text(email_client, "USERNAME", username, create=True)
+    set_text(email_client, "EMAIL_ADDRESS", email_address, create=True)
+    set_text(email_client, "INCOMING_MAIL_SERVER", mail_server_ip, create=True)
+    set_text(email_client, "OUTGOING_MAIL_SERVER", mail_server_ip, create=True)
+
+
 def _update_device_ip(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
     """Scrive gli IP di tutte le interfacce configurate nei rispettivi slot."""
     module = engine.find("MODULE")
@@ -225,16 +255,10 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
             from app.services.pkt_generator.server_config import write_ftp_users
             write_ftp_users(engine, dev_cfg)
 
-    # SMTP / POP3
-    wants_email = bool(cfg.get("smtp") or cfg.get("pop3"))
-    if wants_email:
-        email = engine.find("EMAIL_SERVER")
-        if email is None:
-            email = ET.SubElement(engine, "EMAIL_SERVER")
-        set_text(email, "SMTP_ENABLED", "1" if cfg.get("smtp") else "0", create=True)
-        set_text(email, "POP3_ENABLED", "1" if cfg.get("pop3") else "0", create=True)
-        if cfg.get("smtp"):
-            set_text(email, "SMTP_DOMAIN", str(cfg.get("smtp_domain") or "example.com"), create=True)
+    # SMTP / POP3 / EMAIL
+    if cfg.get("smtp") or cfg.get("pop3") or cfg.get("email"):
+        from app.services.pkt_generator.server_config import write_email_config
+        write_email_config(engine, dev_cfg)
 
 
 def _assign_unique_macs(new_device: ET.Element, used_macs: set[str], device_type: str) -> None:
@@ -383,6 +407,7 @@ def build_device(
             _configure_end_device_dhcp(engine, dev_cfg)
         else:
             _update_device_ip(engine, dev_cfg)
+    _configure_email_client(engine, dev_cfg)
 
     category = (device_meta.get("category") or resolved_type or "").lower()
     if "router" in category:

@@ -199,9 +199,16 @@ class ServerConfig(BaseModel):
     ftp_user: Optional[str] = Field(default=None)
     ftp_password: Optional[str] = Field(default=None)
     ftp_users: Optional[list] = Field(default=None)
+    mail_users: Optional[list] = Field(default=None)
+    mail_domain: Optional[str] = Field(default=None)
     dns_records: Optional[list] = Field(default=None)
     auto_dns_records: bool = Field(default=False)
 
+
+
+class PcConfig(BaseModel):
+    mail_user: Optional[str] = Field(default=None)
+    mail_password: Optional[str] = Field(default=None)
 
 
 class NormalizedNetworkRequest(BaseModel):  
@@ -216,6 +223,7 @@ class NormalizedNetworkRequest(BaseModel):
     dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
     server_services: List[str] = Field(default_factory=list, description="Services to enable on Server-PT (Packet Tracer XML)")
     servers_config: List[ServerConfig] = Field(default_factory=list)
+    pcs_config: List[PcConfig] = Field(default_factory=list)
     vlans: List[VlanConfig] = Field(default_factory=list, description="VLAN definitions for switches")
     nat: Optional[NatConfig] = Field(default=None, description="NAT configuration for routers")
     acl: List[AclConfig] = Field(default_factory=list, description="ACL configurations for routers")

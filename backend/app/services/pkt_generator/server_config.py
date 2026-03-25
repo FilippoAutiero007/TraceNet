@@ -6,6 +6,7 @@ from typing import Any
 
 
 _SERVER_NAME_RE = re.compile(r"^Server(\d+)$", re.IGNORECASE)
+_EMAIL_SERVICES = {"smtp", "pop3", "email"}
 
 
 def _normalize_services(value: Any) -> list[str]:
@@ -21,6 +22,34 @@ def _normalize_services(value: Any) -> list[str]:
 
 def _normalize_hostname(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _is_email_service_enabled(services: list[str] | set[str]) -> bool:
+    lowered = {str(s).strip().lower() for s in services}
+    return bool(lowered.intersection(_EMAIL_SERVICES))
+
+
+def get_mail_users_and_domain(dev_cfg: dict) -> tuple[list[dict[str, str]], str]:
+    domain = str(dev_cfg.get("mail_domain") or "").strip() or "mail.local"
+
+    users: list[dict[str, str]] = []
+    raw_users = dev_cfg.get("mail_users")
+    if isinstance(raw_users, list):
+        for raw_user in raw_users:
+            if not isinstance(raw_user, dict):
+                continue
+            username = str(raw_user.get("username") or "").strip()
+            if not username:
+                continue
+            password = str(raw_user.get("password") or "1234").strip() or "1234"
+            users.append({"username": username, "password": password})
+
+    if not users:
+        users = [
+            {"username": "user1", "password": "1234"},
+            {"username": "user2", "password": "1234"},
+        ]
+    return users, domain
 
 
 def build_server_configs(
@@ -58,7 +87,7 @@ def build_server_configs(
         raw_cfg = servers_config_list[idx] if idx < len(servers_config_list) and isinstance(servers_config_list[idx], dict) else {}
         services = _normalize_services(raw_cfg.get("services"))
         if not services:
-                services = []
+            services = global_services
         hostname = _normalize_hostname(raw_cfg.get("hostname"))
         if not hostname:
             if "dns" in services:
@@ -82,6 +111,10 @@ def build_server_configs(
             dev["ftp_user"] = raw_cfg["ftp_user"]
         if raw_cfg.get("ftp_password"):
             dev["ftp_password"] = raw_cfg["ftp_password"]
+        if raw_cfg.get("mail_users"):
+            dev["mail_users"] = raw_cfg["mail_users"]
+        if raw_cfg.get("mail_domain"):
+            dev["mail_domain"] = raw_cfg["mail_domain"]
 
         dns_server: dict | None = None
     for _idx, dev in servers:
@@ -358,3 +391,59 @@ def write_ftp_users(engine: ET.Element, dev_cfg: dict) -> None:
         if u["rename"]: perms_str += "N"
         if u["list"]:   perms_str += "L"
         ET.SubElement(acct, "PERMISSIONS").text = perms_str
+
+
+def write_email_config(engine: ET.Element, dev_cfg: dict) -> None:
+    """
+    Configura EMAIL_SERVER nel formato reale di PT 8.2.2.
+
+    Struttura XML reale PT 8.2.2:
+    <EMAIL_SERVER>
+      <SMTP_ENABLED>1</SMTP_ENABLED>
+      <SMTP_DOMAIN>tracenet.com</SMTP_DOMAIN>
+      <POP3_ENABLED>1</POP3_ENABLED>
+      <FORWARD_MAIL>0</FORWARD_MAIL>
+      <NO_OF_USERS>2</NO_OF_USERS>
+      <USER0>user1</USER0>
+      <PASSWORD0>1234</PASSWORD0>
+      <NO_OF_MAILS0>0</NO_OF_MAILS0>
+      <USER1>user2</USER1>
+      <PASSWORD1>1234</PASSWORD1>
+      <NO_OF_MAILS1>0</NO_OF_MAILS1>
+    </EMAIL_SERVER>
+    """
+    services = {str(s).strip().lower() for s in (dev_cfg.get("server_services") or [])}
+    email_server = engine.find("EMAIL_SERVER")
+    if not _is_email_service_enabled(list(services)):
+        # Disabilita esplicitamente se il server non ha il servizio email
+        if email_server is not None:
+            smtp_en = email_server.find("SMTP_ENABLED")
+            if smtp_en is not None:
+                smtp_en.text = "0"
+            pop3_en = email_server.find("POP3_ENABLED")
+            if pop3_en is not None:
+                pop3_en.text = "0"
+        return
+
+    users, domain = get_mail_users_and_domain(dev_cfg)
+
+    email_server = engine.find("EMAIL_SERVER")
+    if email_server is None:
+        return
+
+    def _st(tag: str, val: str) -> None:
+        elem = email_server.find(tag)
+        if elem is None:
+            elem = ET.SubElement(email_server, tag)
+        elem.text = val
+
+    _st("SMTP_ENABLED", "1")
+    _st("SMTP_DOMAIN",  domain)
+    _st("POP3_ENABLED", "1")
+    _st("FORWARD_MAIL", "0")
+    _st("NO_OF_USERS",  str(len(users)))
+
+    for i, u in enumerate(users):
+        _st(f"USER{i}",        u["username"])
+        _st(f"PASSWORD{i}",    u["password"])
+        _st(f"NO_OF_MAILS{i}", "0")

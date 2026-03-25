@@ -564,11 +564,14 @@ def generate_server_config(dev_cfg: dict[str, Any]) -> dict[str, Any]:
         "dns": "dns" in services,
         "dhcp": "dhcp" in services,
         "ftp": "ftp" in services,
-        "smtp": "smtp" in services,
-        "pop3": "pop3" in services,
+        "smtp": ("smtp" in services) or ("email" in services),
+        "pop3": ("pop3" in services) or ("email" in services),
+        "email": "email" in services,
         "dns_records": dev_cfg.get("dns_records", []),
         # Optional service parameters (best-effort defaults).
         "ftp_user": str(dev_cfg.get("ftp_user", "cisco")),
         "ftp_password": str(dev_cfg.get("ftp_password", "cisco")),
-        "smtp_domain": str(dev_cfg.get("smtp_domain", dev_cfg.get("email_domain", "")) or "example.com"),
+        "smtp_domain": str(
+            dev_cfg.get("mail_domain", dev_cfg.get("smtp_domain", dev_cfg.get("email_domain", ""))) or "mail.local"
+        ),
     }

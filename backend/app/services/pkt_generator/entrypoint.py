@@ -15,7 +15,7 @@ from .template import get_pkt_generator, get_template_path
 from .topology import build_links_config
 from .utils import safe_name
 from .config_generator import calculate_static_routes
-from .server_config import build_server_configs
+from .server_config import build_server_configs, get_mail_users_and_domain
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,9 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         servers_config_list = config.get("servers_config") or []
         if not isinstance(servers_config_list, list):
             servers_config_list = []
+        pcs_config_list = config.get("pcs_config") or []
+        if not isinstance(pcs_config_list, list):
+            pcs_config_list = []
         vlans_global = list(config.get("vlans") or [])
         nat_global = config.get("nat")
         acl_global = list(config.get("acl") or [])
@@ -393,6 +396,26 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     dhcp_srv_ip = str(d["ip"])
                     break
 
+        # Mail servers per LAN (switch): necessari per EMAIL_CLIENT sui PC della stessa rete.
+        mail_server_by_switch: dict[str, dict[str, Any]] = {}
+        for dev in devices_config:
+            if str(dev.get("type", "")).lower() != "server":
+                continue
+            services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
+            if not {"smtp", "pop3", "email"}.intersection(services):
+                continue
+            server_name = str(dev.get("name", ""))
+            switch_name = link_to_switch.get(server_name)
+            if not switch_name:
+                continue
+            if not str(dev.get("ip", "")).strip():
+                continue
+            # Primo server mail per LAN vince (comportamento stabile).
+            mail_server_by_switch.setdefault(switch_name, dev)
+
+        # Contatori progressivi user1, user2, ... per LAN.
+        mail_user_counter_by_switch: dict[str, int] = defaultdict(int)
+
         while pc_idx < num_pcs:
             name = safe_name("PC", pc_idx)
             switch = link_to_switch.get(name)
@@ -430,6 +453,44 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                             "dhcp_mode": "static",
                         }
                     )
+
+            # Configurazione client email sul PC se nella stessa LAN di un server mail.
+            mail_srv = mail_server_by_switch.get(switch or "")
+            if mail_srv is not None:
+                users, domain = get_mail_users_and_domain(mail_srv)
+                users_by_name = {u["username"]: u["password"] for u in users}
+
+                explicit_pc_cfg = (
+                    pcs_config_list[pc_idx]
+                    if pc_idx < len(pcs_config_list) and isinstance(pcs_config_list[pc_idx], dict)
+                    else {}
+                )
+                explicit_user = str(explicit_pc_cfg.get("mail_user") or "").strip()
+                explicit_password = str(explicit_pc_cfg.get("mail_password") or "").strip()
+
+                if explicit_user:
+                    selected_user = explicit_user
+                    selected_password = (
+                        explicit_password
+                        or users_by_name.get(selected_user)
+                        or "1234"
+                    )
+                    pc_cfg["mail_username"] = selected_user
+                    pc_cfg["mail_password"] = selected_password
+                    pc_cfg["mail_domain"] = domain
+                    pc_cfg["mail_server_ip"] = str(mail_srv.get("ip", "")).strip()
+                else:
+                    # Assegna utente solo se esiste nel server (non oltre len(users))
+                    counter = mail_user_counter_by_switch[switch or ""]
+                    if counter < len(users):
+                        selected_user = users[counter]["username"]
+                        selected_password = users[counter]["password"]
+                        mail_user_counter_by_switch[switch or ""] += 1
+                        pc_cfg["mail_username"] = selected_user
+                        pc_cfg["mail_password"] = selected_password
+                        pc_cfg["mail_domain"] = domain
+                        pc_cfg["mail_server_ip"] = str(mail_srv.get("ip", "")).strip()
+                    # Se counter >= len(users) → PC non configurato, niente email client
 
             devices_config.append(pc_cfg)
             pc_idx += 1
