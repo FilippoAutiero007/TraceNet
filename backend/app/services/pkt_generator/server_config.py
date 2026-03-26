@@ -113,6 +113,8 @@ def build_server_configs(
             dev["ftp_password"] = raw_cfg["ftp_password"]
         if raw_cfg.get("mail_users"):
             dev["mail_users"] = raw_cfg["mail_users"]
+        if raw_cfg.get("dhcp_pools"):
+            dev["dhcp_pools"] = raw_cfg["dhcp_pools"]
         if raw_cfg.get("mail_domain"):
             dev["mail_domain"] = raw_cfg["mail_domain"]
 
@@ -281,28 +283,56 @@ def write_dhcp_config(engine: ET.Element, dev_cfg: dict) -> None:
         pools = dhcp_server.find("POOLS")
         if pools is None:
             continue
-        pool = pools.find("POOL")
-        if pool is None:
+        # Rimuovi pool esistenti e riscrivi da dhcp_pools
+        for old_pool in list(pools.findall("POOL")):
+            pools.remove(old_pool)
+
+        dhcp_pools = dev_cfg.get("dhcp_pools") or []
+        if not dhcp_pools:
+            # Fallback: un pool dalla LAN del server
+            dhcp_pools = [{
+                "name": f"rete{network_addr}",
+                "network": network_addr,
+                "mask": mask,
+                "gateway": gateway,
+                "dns": str(dns_ip),
+            }]
+
+        for pool_cfg in dhcp_pools:
+            pool_gw = str(pool_cfg.get("gateway", gateway)).strip()
+            pool_mask = str(pool_cfg.get("mask", mask)).strip()
+            pool_net = str(pool_cfg.get("network", network_addr)).strip()
+            pool_dns = str(pool_cfg.get("dns", dns_ip)).strip()
+            raw_net = str(pool_cfg.get("network", "")).strip()
+            pool_name = str(pool_cfg.get("name", f"rete{raw_net}")).strip()
+            try:
+                import ipaddress as _ipa
+                pnet = _ipa.IPv4Network(f"{pool_gw}/{pool_mask}", strict=False)
+                phosts = list(pnet.hosts())
+                pstart = str(phosts[5]) if len(phosts) > 5 else str(phosts[0])
+                pend = str(phosts[-1])
+                pnet_addr = str(pnet.network_address)
+            except Exception:
+                pstart = "0.0.0.0"
+                pend = "0.0.0.0"
+                pnet_addr = pool_net
+
             pool = ET.SubElement(pools, "POOL")
-
-        def _st(tag: str, val: str) -> None:
-            elem = pool.find(tag)
-            if elem is None:
+            def _st(tag: str, val: str) -> None:
                 elem = ET.SubElement(pool, tag)
-            elem.text = val
-
-        _st("NAME",           "serverPool")
-        _st("NETWORK",        network_addr)
-        _st("MASK",           mask)
-        _st("DEFAULT_ROUTER", gateway)
-        _st("TFTP_ADDRESS",   "0.0.0.0")
-        _st("START_IP",       start_ip)
-        _st("END_IP",         end_ip)
-        _st("DNS_SERVER",     str(dns_ip))
-        _st("MAX_USERS",      "512")
-        _st("LEASE_TIME",     "86400000")
-        _st("WLC_ADDRESS",    "0.0.0.0")
-        _st("DOMAIN_NAME",    "")
+                elem.text = val
+            _st("NAME",           pool_name)
+            _st("NETWORK",        pnet_addr)
+            _st("MASK",           pool_mask)
+            _st("DEFAULT_ROUTER", pool_gw)
+            _st("TFTP_ADDRESS",   "0.0.0.0")
+            _st("START_IP",       pstart)
+            _st("END_IP",         pend)
+            _st("DNS_SERVER",     pool_dns)
+            _st("MAX_USERS",      "512")
+            _st("LEASE_TIME",     "86400000")
+            _st("WLC_ADDRESS",    "0.0.0.0")
+            _st("DOMAIN_NAME",    "")
 
 def write_ftp_users(engine: ET.Element, dev_cfg: dict) -> None:
     """

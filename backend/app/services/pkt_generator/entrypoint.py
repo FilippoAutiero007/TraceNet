@@ -335,6 +335,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     if "dns" in _svc and not _dev.get("dns_records"):
                         _dev["dns_records"] = _root_dns_records
                         break
+        # Se l'utente ha gia specificato dhcp_pools via servers_config, non sovrascrivere
         # Prepara i dhcp_pools per i server DHCP (per ora: un pool per la LAN principale del server).
         for d in devices_config:
             if str(d.get("type", "")).lower() != "server":
@@ -357,16 +358,43 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             except Exception:
                 network_addr = "0.0.0.0"
 
-            d["dhcp_pools"] = [
-                {
-                    "name": f"{d.get('name', 'server')}_pool",
+            # Crea un pool per ogni LAN presente (propria + quelle servite via helper-address)
+            all_pools = []
+            # Pool per ogni LAN: prima quella del server, poi le altre
+            for seg in lan_segments:
+                seg_net = seg.get("network", "")
+                seg_net_base = seg_net.split("/")[0] if "/" in seg_net else seg_net
+                if not seg_net:
+                    continue
+                pool_name = f"rete{seg_net_base}"
+                pool_gw = seg.get("gateway", gw)
+                pool_mask = seg.get("mask", mask)
+                all_pools.append({
+                    "name": pool_name,
+                    "network": seg_net_base,
+                    "mask": pool_mask,
+                    "gateway": pool_gw,
+                    "dns": server_ip,
+                })
+            # Fallback: se lan_segments vuoto usa la rete del server stesso
+            if not all_pools:
+                all_pools.append({
+                    "name": f"rete{network_addr}",
                     "network": network_addr,
                     "mask": mask,
                     "gateway": gw,
                     "dns": server_ip,
-                    # start_ip/end_ip verranno calcolati automaticamente in write_dhcp_config
-                }
-            ]
+                })
+            user_pools = d.get("dhcp_pools") or []
+            if user_pools:
+                # Merge: usa nomi utente ma dati di rete da all_pools
+                merged = []
+                for i, auto_pool in enumerate(all_pools):
+                    user_name = user_pools[i]["name"] if i < len(user_pools) and user_pools[i].get("name") else auto_pool["name"]
+                    merged.append({**auto_pool, "name": user_name})
+                d["dhcp_pools"] = merged
+            else:
+                d["dhcp_pools"] = all_pools
 
         # Propaga dhcp_server_ip ai router per ip helper-address
         # Solo ai router che NON sono nella stessa LAN del server DHCP
