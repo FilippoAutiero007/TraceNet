@@ -325,16 +325,16 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             devices_config=devices_config,
         )
 
+        # Resolve a single DNS server IP for DHCP pools when DNS and DHCP are split.
+        dns_server_ip: str | None = None
+        for dev in devices_config:
+            if str(dev.get("type", "")).lower() != "server":
+                continue
+            services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
+            if "dns" in services and str(dev.get("ip", "")).strip():
+                dns_server_ip = str(dev["ip"]).strip()
+                break
 
-        # Inject dns_records from root config into the DNS server device
-        _root_dns_records = config.get("dns_records") or []
-        if _root_dns_records:
-            for _dev in devices_config:
-                if str(_dev.get("type", "")).lower() == "server":
-                    _svc = {str(s).lower() for s in (_dev.get("server_services") or [])}
-                    if "dns" in _svc and not _dev.get("dns_records"):
-                        _dev["dns_records"] = _root_dns_records
-                        break
         # Se l'utente ha gia specificato dhcp_pools via servers_config, non sovrascrivere
         # Prepara i dhcp_pools per i server DHCP (per ora: un pool per la LAN principale del server).
         for d in devices_config:
@@ -369,21 +369,23 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 pool_name = f"rete{seg_net_base}"
                 pool_gw = seg.get("gateway", gw)
                 pool_mask = seg.get("mask", mask)
+                pool_dns = dns_server_ip or seg.get("dns_server") or server_ip
                 all_pools.append({
                     "name": pool_name,
                     "network": seg_net_base,
                     "mask": pool_mask,
                     "gateway": pool_gw,
-                    "dns": server_ip,
+                    "dns": pool_dns,
                 })
             # Fallback: se lan_segments vuoto usa la rete del server stesso
             if not all_pools:
+                pool_dns = dns_server_ip or server_ip
                 all_pools.append({
                     "name": f"rete{network_addr}",
                     "network": network_addr,
                     "mask": mask,
                     "gateway": gw,
-                    "dns": server_ip,
+                    "dns": pool_dns,
                 })
             user_pools = d.get("dhcp_pools") or []
             if user_pools:

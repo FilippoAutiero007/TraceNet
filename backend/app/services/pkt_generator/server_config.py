@@ -39,6 +39,9 @@ def build_server_configs(
     - dns_records nel server DNS (record A per tutti i server HTTP)
     """
     global_services = _normalize_services(server_services_global)
+    # Legacy-only fallback: apply root-level server_services only when no per-server
+    # configuration list is provided at all.
+    legacy_global_services = global_services if not servers_config_list else []
 
     servers: list[tuple[int, dict]] = []
     for dev in devices_config:
@@ -59,9 +62,10 @@ def build_server_configs(
 
     for idx, dev in servers:
         raw_cfg = servers_config_list[idx] if idx < len(servers_config_list) and isinstance(servers_config_list[idx], dict) else {}
+        has_explicit_services = isinstance(raw_cfg, dict) and "services" in raw_cfg
         services = _normalize_services(raw_cfg.get("services"))
-        if not services:
-            services = global_services
+        if not has_explicit_services:
+            services = legacy_global_services
         hostname = _normalize_hostname(raw_cfg.get("hostname"))
         if not hostname:
             if "dns" in services:
@@ -87,8 +91,8 @@ def build_server_configs(
             dev["ftp_password"] = raw_cfg["ftp_password"]
         if raw_cfg.get("mail_users"):
             dev["mail_users"] = raw_cfg["mail_users"]
-        if raw_cfg.get("dhcp_pools"):
-            dev["dhcp_pools"] = raw_cfg["dhcp_pools"]
+        if "dhcp_pools" in raw_cfg:
+            dev["dhcp_pools"] = raw_cfg.get("dhcp_pools") or []
         if raw_cfg.get("mail_domain"):
             dev["mail_domain"] = raw_cfg["mail_domain"]
 

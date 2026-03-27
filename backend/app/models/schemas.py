@@ -10,6 +10,17 @@ from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+def _normalize_service_list(value: Any) -> List[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    out: List[str] = []
+    for item in value:
+        s = str(item or "").strip().lower()
+        if s:
+            out.append(s)
+    return out
+
+
 class RoutingProtocol(str, Enum):
     STATIC = "static"
     RIP = "RIP"
@@ -202,7 +213,13 @@ class ServerConfig(BaseModel):
     mail_users: Optional[list] = Field(default=None)
     mail_domain: Optional[str] = Field(default=None)
     dns_records: Optional[list] = Field(default=None)
+    dhcp_pools: Optional[list] = Field(default=None)
     auto_dns_records: bool = Field(default=False)
+
+    @field_validator("services", mode="before")
+    @classmethod
+    def normalize_services(cls, value: Any) -> List[str]:
+        return _normalize_service_list(value)
 
 
 
@@ -233,6 +250,11 @@ class NormalizedNetworkRequest(BaseModel):
         description="Optional topology hints for separating edge and backbone routers",
     )
 
+    @field_validator("server_services", mode="before")
+    @classmethod
+    def normalize_server_services(cls, value: Any) -> List[str]:
+        return _normalize_service_list(value)
+
     @field_validator("base_network")
     @classmethod
     def validate_cidr(cls, value: str) -> str:
@@ -252,12 +274,12 @@ class NormalizedNetworkRequest(BaseModel):
 
         # Normalize service names for downstream code (entrypoint/config_generator).
         if self.server_services:
-            self.server_services = [str(s).strip().lower() for s in self.server_services if str(s).strip()]
+            self.server_services = _normalize_service_list(self.server_services)
 
         if self.servers_config:
             for srv in self.servers_config:
                 if srv.services:
-                    srv.services = [str(s).strip().lower() for s in srv.services if str(s).strip()]
+                    srv.services = _normalize_service_list(srv.services)
                 srv.hostname = str(srv.hostname or "").strip()
 
         if self.subnets:
