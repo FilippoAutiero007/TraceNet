@@ -3,6 +3,8 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from .server_services import normalize_services
+
 
 _EMAIL_SERVICES = {"smtp", "pop3", "email"}
 
@@ -42,10 +44,7 @@ def _set_text(parent: ET.Element, tag: str, value: str) -> None:
 
 
 def write_email_config(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
-    services_raw = dev_cfg.get("server_services")
-    services: set[str] = set()
-    if isinstance(services_raw, (list, set, tuple)):
-        services = {str(s).strip().lower() for s in services_raw if str(s).strip()}
+    services = normalize_services(dev_cfg.get("server_services"))
 
     smtp = engine.find("SMTP_SERVER")
     pop3 = engine.find("POP3_SERVER")
@@ -74,4 +73,3 @@ def write_email_config(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
             acct = ET.SubElement(mgr, "ACCOUNT")
             ET.SubElement(acct, "USERNAME").text = user["username"]
             ET.SubElement(acct, "PASSWORD").text = user["password"]
-

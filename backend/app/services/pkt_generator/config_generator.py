@@ -5,6 +5,8 @@ import logging
 from collections import deque
 from typing import Any, Iterable, Optional
 
+from .server_services import normalize_services
+
 logger = logging.getLogger(__name__)
 
 def _as_ipv4_network(ip: str, mask: str) -> Optional[ipaddress.IPv4Network]:
@@ -558,7 +560,7 @@ def generate_switch_config(dev_cfg: dict[str, Any], vlans: list[dict[str, Any]] 
 
 
 def generate_server_config(dev_cfg: dict[str, Any]) -> dict[str, Any]:
-    services = {str(s).strip().lower() for s in (dev_cfg.get("server_services") or dev_cfg.get("services") or [])}
+    services = normalize_services(dev_cfg.get("server_services"))
     return {
         "http": "http" in services,
         "https": "https" in services,

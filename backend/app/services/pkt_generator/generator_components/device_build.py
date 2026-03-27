@@ -13,6 +13,8 @@ from app.services.pkt_generator.config_generator import (
     generate_server_config,
     generate_switch_config,
 )
+from app.services.pkt_generator.server_dhcp import write_dhcp_config
+from app.services.pkt_generator.server_mail import write_email_config
 from app.services.pkt_generator.server_config import write_dns_records
 from app.services.pkt_generator.utils import rand_memaddr, set_text, validate_name, rand_saveref
 
@@ -250,7 +252,6 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
 
     # DHCP
     if cfg.get("dhcp"):
-        from app.services.pkt_generator.server_config import write_dhcp_config
         write_dhcp_config(engine, dev_cfg)
 
     # FTP
@@ -265,7 +266,6 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
 
     # SMTP / POP3 / EMAIL
     if cfg.get("smtp") or cfg.get("pop3") or cfg.get("email"):
-        from app.services.pkt_generator.server_config import write_email_config
         write_email_config(engine, dev_cfg)
 
 

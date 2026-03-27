@@ -194,10 +194,14 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             "subnets": [s.model_dump() for s in request.subnets],
             "devices": request.devices.model_dump(),
             "routing_protocol": request.routing_protocol.value,
+            "dhcp_from_router": bool(getattr(request, "dhcp_from_router", False)),
+            "dhcp_dns": getattr(request, "dhcp_dns", None),
             "XML_VERSION": "8.2.2.0400",
             "topology": request.topology.model_dump() if request.topology else None,
-            "dns_records": [],
+            "dns_records": request.dns_records or [],
             "server_services": request.server_services or [],
+            "servers_config": [s.model_dump() for s in (request.servers_config or [])],
+            "pcs_config": [p.model_dump() for p in (request.pcs_config or [])],
         }
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")

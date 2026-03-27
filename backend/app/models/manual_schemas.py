@@ -5,7 +5,14 @@ Bypasses NLP parsing for deterministic, fast generation
 
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from app.models.schemas import RoutingProtocol, DeviceConfig, SubnetRequest, TopologyConfig
+from app.models.schemas import (
+    RoutingProtocol,
+    DeviceConfig,
+    PcConfig,
+    ServerConfig,
+    SubnetRequest,
+    TopologyConfig,
+)
 
 
 class ManualNetworkRequest(BaseModel):
@@ -31,7 +38,23 @@ class ManualNetworkRequest(BaseModel):
         default=RoutingProtocol.STATIC,
         description="Routing protocol to use"
     )
+    dhcp_from_router: bool = Field(
+        default=False,
+        description="Enable router-based DHCP pools instead of dedicated DHCP server",
+    )
+    dhcp_dns: Optional[str] = Field(
+        default=None,
+        description="Optional DNS server IP for DHCP pools",
+    )
     server_services: Optional[List[str]] = Field(default=None, description="Services to enable on server (dns, http, dhcp, ftp...)")
+    servers_config: Optional[List[ServerConfig]] = Field(
+        default=None,
+        description="Per-server configuration (services, hostname, dns_records, dhcp_pools, mail users...)",
+    )
+    pcs_config: Optional[List[PcConfig]] = Field(
+        default=None,
+        description="Per-PC configuration (mail credentials, etc.)",
+    )
     dns_records: Optional[List[dict]] = Field(default=None, description="DNS A records for DNS server")
     topology: Optional[TopologyConfig] = Field(
         default=None,

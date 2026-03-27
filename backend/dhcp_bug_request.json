@@ -1,0 +1,18 @@
+﻿{
+  "base_network": "192.168.1.0/24",
+  "routers": 1,
+  "switches": 1,
+  "pcs": 3,
+  "servers": 3,
+  "routing_protocol": "STATIC",
+  "dhcp_from_router": false,
+  "server_services": [],
+  "servers_config": [
+    { "services": ["dns"],  "hostname": "dns1.local"  },
+    { "services": ["http"], "hostname": "web1.local"  },
+    { "services": ["dhcp"], "hostname": "dhcp1.local" }
+  ],
+  "subnets": [
+    { "name": "LAN1", "required_hosts": 30 }
+  ]
+}

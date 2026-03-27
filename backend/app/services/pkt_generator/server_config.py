@@ -6,20 +6,10 @@ from typing import Any
 
 from .server_dhcp import write_dhcp_config
 from .server_mail import get_mail_users_and_domain, write_email_config
+from .server_services import has_service, normalize_services, normalize_services_list
 
 
 _SERVER_NAME_RE = re.compile(r"^Server(\d+)$", re.IGNORECASE)
-
-
-def _normalize_services(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    out: list[str] = []
-    for item in value:
-        s = str(item or "").strip().lower()
-        if s:
-            out.append(s)
-    return out
 
 
 def _normalize_hostname(value: Any) -> str:
@@ -38,7 +28,7 @@ def build_server_configs(
     - hostname per ogni server
     - dns_records nel server DNS (record A per tutti i server HTTP)
     """
-    global_services = _normalize_services(server_services_global)
+    global_services = normalize_services_list(server_services_global)
     # Legacy-only fallback: apply root-level server_services only when no per-server
     # configuration list is provided at all.
     legacy_global_services = global_services if not servers_config_list else []
@@ -63,7 +53,7 @@ def build_server_configs(
     for idx, dev in servers:
         raw_cfg = servers_config_list[idx] if idx < len(servers_config_list) and isinstance(servers_config_list[idx], dict) else {}
         has_explicit_services = isinstance(raw_cfg, dict) and "services" in raw_cfg
-        services = _normalize_services(raw_cfg.get("services"))
+        services = normalize_services_list(raw_cfg.get("services"))
         if not has_explicit_services:
             services = legacy_global_services
         hostname = _normalize_hostname(raw_cfg.get("hostname"))
@@ -98,8 +88,7 @@ def build_server_configs(
 
     dns_server: dict | None = None
     for _idx, dev in servers:
-        services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
-        if "dns" in services:
+        if has_service(dev, "dns"):
             dns_server = dev
             break
 
@@ -121,7 +110,7 @@ def build_server_configs(
     counters: dict[str, int] = {}
     seen: set[tuple[str, str]] = set()
     for _idx, dev in servers:
-        services = {str(s).strip().lower() for s in (dev.get("server_services") or [])}
+        services = normalize_services(dev.get("server_services"))
         ip = str(dev.get("ip", "")).strip()
         if not ip:
             continue
@@ -194,8 +183,7 @@ def write_ftp_users(engine: ET.Element, dev_cfg: dict) -> None:
     - Mantiene sempre l'utente default cisco/cisco con tutti i permessi.
     - Utenti custom da dev_cfg["ftp_users"].
     """
-    services = {str(s).strip().lower() for s in (dev_cfg.get("server_services") or [])}
-    if "ftp" not in services:
+    if not has_service(dev_cfg, "ftp"):
         return
 
     ftp = engine.find("FTP_SERVER")
