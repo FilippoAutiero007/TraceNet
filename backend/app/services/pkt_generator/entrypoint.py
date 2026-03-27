@@ -368,7 +368,11 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 seg_net_base = seg_net.split("/")[0] if "/" in seg_net else seg_net
                 if not seg_net:
                     continue
-                pool_name = f"rete{seg_net_base}"
+                # La LAN del server stesso usa serverPool, le remote usano rete<network>
+                if seg_net_base == network_addr:
+                    pool_name = "serverPool"
+                else:
+                    pool_name = f"rete{seg_net_base}"
                 pool_gw = seg.get("gateway", gw)
                 pool_mask = seg.get("mask", mask)
                 pool_dns = dns_server_ip or seg.get("dns_server") or server_ip
@@ -399,6 +403,15 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 d["dhcp_pools"] = merged
             else:
                 d["dhcp_pools"] = all_pools
+                print("DEBUG DHCP SERVER:", {
+                "name": d.get("name"),
+                "ip": d.get("ip"),
+                "subnet": d.get("subnet"),
+                "gateway_ip": d.get("gateway_ip"),
+                "network": d.get("network"),
+                "dhcp_pools": d.get("dhcp_pools"),
+            })
+
 
         # Propaga dhcp_server_ip ai router per ip helper-address
         # Solo ai router che NON sono nella stessa LAN del server DHCP

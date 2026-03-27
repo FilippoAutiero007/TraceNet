@@ -207,6 +207,9 @@ def write_dhcp_config(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
         net = _parse_network_from_ip_and_mask(dev_cfg.get("ip") or engine_ip, dev_cfg.get("subnet") or dev_cfg.get("mask") or engine_mask)
 
     if net is None:
+        # Prova con ip+subnet dal dev_cfg prima del fallback a 0.0.0.0
+        net = _parse_network_from_ip_and_mask(dev_cfg.get("ip"), dev_cfg.get("subnet") or dev_cfg.get("mask"))
+    if net is None:
         # Hard fallback required by tests on invalid inputs.
         net = ipaddress.IPv4Network("0.0.0.0/0", strict=False)
         gateway = ipaddress.IPv4Address("0.0.0.0")
