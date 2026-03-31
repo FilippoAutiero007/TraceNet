@@ -392,11 +392,21 @@ def generate_router_config(
 
         commands.append(" no shutdown")
 
-        # ip helper-address per DHCP relay se c'è un server DHCP dedicato
+        # ip helper-address per DHCP relay se c'e un server DHCP dedicato
         dhcp_server_ip = dev_cfg.get("dhcp_server_ip", "")
         role = str(iface.get("role", "")).strip().lower()
         if dhcp_server_ip and role == "lan":
-            commands.append(f" ip helper-address {dhcp_server_ip}")
+            # Non aggiungere helper se questa interfaccia e nella stessa rete del server DHCP
+            try:
+                import ipaddress as _ipa2
+                iface_net = str(_ipa2.IPv4Network(
+                    str(ip) + "/" + str(mask), strict=False).network_address)
+                dhcp_net = str(_ipa2.IPv4Network(
+                    str(dhcp_server_ip) + "/" + str(mask), strict=False).network_address)
+                if iface_net != dhcp_net:
+                    commands.append(f" ip helper-address {dhcp_server_ip}")
+            except Exception:
+                commands.append(f" ip helper-address {dhcp_server_ip}")
         commands.append("!")
 
     # DHCP from router (IOS DHCP server)

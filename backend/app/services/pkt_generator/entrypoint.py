@@ -360,34 +360,39 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             except Exception:
                 network_addr = "0.0.0.0"
 
-            # Crea un pool per ogni LAN presente (propria + quelle servite via helper-address)
-            all_pools = []
-            # Pool per ogni LAN: prima quella del server, poi le altre
+            # Crea un pool per ogni LAN: serverPool (locale) prima, rete<network> (remote) dopo
+            local_pools = []
+            remote_pools = []
             for seg in lan_segments:
                 seg_net = seg.get("network", "")
                 seg_net_base = seg_net.split("/")[0] if "/" in seg_net else seg_net
                 if not seg_net:
                     continue
-                # La LAN del server stesso usa serverPool, le remote usano rete<network>
-                if seg_net_base == network_addr:
-                    pool_name = "serverPool"
-                else:
-                    pool_name = f"rete{seg_net_base}"
                 pool_gw = seg.get("gateway", gw)
                 pool_mask = seg.get("mask", mask)
                 pool_dns = dns_server_ip or seg.get("dns_server") or server_ip
-                all_pools.append({
-                    "name": pool_name,
-                    "network": seg_net_base,
-                    "mask": pool_mask,
-                    "gateway": pool_gw,
-                    "dns": pool_dns,
-                })
+                if seg_net_base == network_addr:
+                    local_pools.append({
+                        "name": "serverPool",
+                        "network": seg_net_base,
+                        "mask": pool_mask,
+                        "gateway": pool_gw,
+                        "dns": pool_dns,
+                    })
+                else:
+                    remote_pools.append({
+                        "name": f"rete{seg_net_base}",
+                        "network": seg_net_base,
+                        "mask": pool_mask,
+                        "gateway": pool_gw,
+                        "dns": pool_dns,
+                    })
+            all_pools = local_pools + remote_pools
             # Fallback: se lan_segments vuoto usa la rete del server stesso
             if not all_pools:
                 pool_dns = dns_server_ip or server_ip
                 all_pools.append({
-                    "name": f"rete{network_addr}",
+                    "name": "serverPool",
                     "network": network_addr,
                     "mask": mask,
                     "gateway": gw,
@@ -413,8 +418,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             })
 
 
-        # Propaga dhcp_server_ip ai router per ip helper-address
-        # Solo ai router che NON sono nella stessa LAN del server DHCP
+        # Propaga dhcp_server_ip per ip helper-address su interfacce LAN remote
         for d in devices_config:
             if str(d.get("type", "")).lower() != "server":
                 continue
@@ -430,7 +434,8 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             except Exception:
                 pass
             for r in routers_config:
-                same_lan = False
+                # Imposta dhcp_server_ip se almeno una interfaccia LAN e in rete diversa dal DHCP server
+                has_remote_lan = False
                 for iface in r.get("interfaces") or []:
                     if str(iface.get("role", "")).lower() != "lan":
                         continue
@@ -438,12 +443,12 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                         r_net = str(_ipa.IPv4Network(
                             str(iface["ip"]) + "/" + str(iface.get("mask", "255.255.255.0")),
                             strict=False).network_address)
-                        if dhcp_srv_network and r_net == dhcp_srv_network:
-                            same_lan = True
+                        if dhcp_srv_network and r_net != dhcp_srv_network:
+                            has_remote_lan = True
                             break
                     except Exception:
                         continue
-                if not same_lan:
+                if has_remote_lan:
                     r["dhcp_server_ip"] = d["ip"]
             break
 

@@ -253,6 +253,20 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
     # DHCP
     if cfg.get("dhcp"):
         write_dhcp_config(engine, dev_cfg)
+    else:
+        # Disabilita DHCP e svuota i pool del template per server senza DHCP
+        dhcp_servers = engine.find("DHCP_SERVERS")
+        if dhcp_servers is not None:
+            for ap in dhcp_servers.findall("ASSOCIATED_PORTS/ASSOCIATED_PORT"):
+                srv = ap.find("DHCP_SERVER")
+                if srv is not None:
+                    enabled = srv.find("ENABLED")
+                    if enabled is not None:
+                        enabled.text = "0"
+                    pools = srv.find("POOLS")
+                    if pools is not None:
+                        for pool in list(pools.findall("POOL")):
+                            pools.remove(pool)
 
     # FTP
     if "ftp" in cfg:
