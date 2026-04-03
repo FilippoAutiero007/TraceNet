@@ -11,6 +11,7 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 ENV/
 .tmp_*.py
@@ -65,4 +66,3 @@ backend/.env*
 backend/test_output*/
 
 .venv-linux/
-
