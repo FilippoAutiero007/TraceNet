@@ -225,6 +225,50 @@ def _ensure_switch_running_config(engine: ET.Element, dev_cfg: dict[str, Any] | 
     _write_running_config_lines(running, commands)
 
 
+def _clear_dns_config(engine: ET.Element) -> None:
+    dns = engine.find("DNS_SERVER")
+    if dns is None:
+        return
+    set_text(dns, "ENABLED", "0", create=True)
+    db = dns.find("NAMESERVER-DATABASE")
+    if db is not None:
+        db.clear()
+
+
+def _clear_dhcp_config(engine: ET.Element) -> None:
+    dhcp_servers = engine.find("DHCP_SERVERS")
+    if dhcp_servers is None:
+        return
+    for ap in dhcp_servers.findall("ASSOCIATED_PORTS/ASSOCIATED_PORT"):
+        srv = ap.find("DHCP_SERVER")
+        if srv is None:
+            continue
+        set_text(srv, "ENABLED", "0", create=True)
+        pools = srv.find("POOLS")
+        if pools is None:
+            pools = ET.SubElement(srv, "POOLS")
+        pools.clear()
+        reservations = srv.find("DHCP_RESERVATIONS")
+        if reservations is None:
+            reservations = ET.SubElement(srv, "DHCP_RESERVATIONS")
+        reservations.clear()
+        if srv.find("AUTOCONFIG") is None:
+            ET.SubElement(srv, "AUTOCONFIG")
+
+
+def _clear_ftp_config(engine: ET.Element) -> None:
+    ftp = engine.find("FTP_SERVER")
+    if ftp is None:
+        return
+    set_text(ftp, "ENABLED", "0", create=True)
+    users = ftp.find("USERS")
+    if users is not None:
+        users.clear()
+    acct_mgr = ftp.find("USER_ACCOUNT_MNGR")
+    if acct_mgr is not None:
+        acct_mgr.clear()
+
+
 def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | None = None) -> None:
     """
     Packet Tracer servers are configured via ENGINE service tags (not IOS RUNNINGCONFIG).
@@ -249,24 +293,14 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
         set_text(dns, "ENABLED", "1" if cfg["dns"] else "0", create=True)
         if cfg["dns"]:
             write_dns_records(engine, dev_cfg)
+        else:
+            _clear_dns_config(engine)
 
     # DHCP
     if cfg.get("dhcp"):
         write_dhcp_config(engine, dev_cfg)
     else:
-        # Disabilita DHCP e svuota i pool del template per server senza DHCP
-        dhcp_servers = engine.find("DHCP_SERVERS")
-        if dhcp_servers is not None:
-            for ap in dhcp_servers.findall("ASSOCIATED_PORTS/ASSOCIATED_PORT"):
-                srv = ap.find("DHCP_SERVER")
-                if srv is not None:
-                    enabled = srv.find("ENABLED")
-                    if enabled is not None:
-                        enabled.text = "0"
-                    pools = srv.find("POOLS")
-                    if pools is not None:
-                        for pool in list(pools.findall("POOL")):
-                            pools.remove(pool)
+        _clear_dhcp_config(engine)
 
     # FTP
     if "ftp" in cfg:
@@ -277,10 +311,11 @@ def _configure_server_services(engine: ET.Element, dev_cfg: dict[str, Any] | Non
         if cfg["ftp"]:
             from app.services.pkt_generator.server_config import write_ftp_users
             write_ftp_users(engine, dev_cfg)
+        else:
+            _clear_ftp_config(engine)
 
     # SMTP / POP3 / EMAIL
-    if cfg.get("smtp") or cfg.get("pop3") or cfg.get("email"):
-        write_email_config(engine, dev_cfg)
+    write_email_config(engine, dev_cfg)
 
 
 def _assign_unique_macs(new_device: ET.Element, used_macs: set[str], device_type: str) -> None:

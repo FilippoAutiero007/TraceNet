@@ -49,11 +49,15 @@ def write_email_config(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
     smtp = engine.find("SMTP_SERVER")
     pop3 = engine.find("POP3_SERVER")
 
-    if services and not _is_email_service_enabled(services):
+    if not _is_email_service_enabled(services):
         for node in (smtp, pop3):
             if node is None:
                 continue
             _set_text(node, "ENABLED", "0")
+            _set_text(node, "DOMAIN", "")
+            mgr = node.find("USER_ACCOUNT_MNGR")
+            if mgr is not None:
+                mgr.clear()
         return
 
     users, domain = get_mail_users_and_domain(dev_cfg)

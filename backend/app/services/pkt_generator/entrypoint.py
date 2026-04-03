@@ -408,14 +408,6 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 d["dhcp_pools"] = merged
             else:
                 d["dhcp_pools"] = all_pools
-                print("DEBUG DHCP SERVER:", {
-                "name": d.get("name"),
-                "ip": d.get("ip"),
-                "subnet": d.get("subnet"),
-                "gateway_ip": d.get("gateway_ip"),
-                "network": d.get("network"),
-                "dhcp_pools": d.get("dhcp_pools"),
-            })
 
 
         # Propaga dhcp_server_ip per ip helper-address su interfacce LAN remote

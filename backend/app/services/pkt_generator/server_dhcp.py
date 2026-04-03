@@ -188,9 +188,10 @@ def _set_text(parent: ET.Element, tag: str, value: str) -> None:
 
 def write_dhcp_config(engine: ET.Element, dev_cfg: dict[str, Any]) -> None:
     services_raw = dev_cfg.get("server_services")
-    services = normalize_services(services_raw) if isinstance(services_raw, (list, set, tuple)) else set()
-    if "dhcp" not in services:
-        return
+    if isinstance(services_raw, (list, set, tuple)):
+        services = normalize_services(services_raw)
+        if "dhcp" not in services:
+            return
 
     dhcp_servers = engine.find("DHCP_SERVERS")
     if dhcp_servers is None:
