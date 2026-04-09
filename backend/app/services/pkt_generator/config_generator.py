@@ -73,6 +73,22 @@ def _resolve_router_pool_dns(
     return None
 
 
+def _iter_unique_interface_networks(dev_cfg: dict[str, Any]) -> list[ipaddress.IPv4Network]:
+    networks: list[ipaddress.IPv4Network] = []
+    seen: set[str] = set()
+    for iface in dev_cfg.get("interfaces", []):
+        ip = str(iface.get("ip", "")).strip()
+        mask = str(iface.get("mask", "")).strip()
+        net = _as_ipv4_network(ip, mask)
+        if net is None:
+            continue
+        key = str(net.with_prefixlen)
+        if key in seen:
+            continue
+        seen.add(key)
+        networks.append(net)
+    return networks
+
 
 def _iter_router_devices(all_devices: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     routers: list[dict[str, Any]] = []
@@ -488,22 +504,25 @@ def generate_router_config(
         commands.append("router rip")
         commands.append(" version 2")
         commands.append(" no auto-summary")
-        # Aggiungi network per ogni interfaccia configurata
-        networks_added = set()
-        for iface in dev_cfg.get("interfaces", []):
-            ip = str(iface.get("ip", "")).strip()
-            mask = str(iface.get("mask", "")).strip()
-            if not ip or not mask:
-                continue
-            try:
-                # RIP vuole il network address classful
-                net = ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
-                net_str = str(net.network_address)
-                if net_str not in networks_added:
-                    networks_added.add(net_str)
-                    commands.append(f" network {net_str}")
-            except Exception:
-                continue
+        for net in _iter_unique_interface_networks(dev_cfg):
+            commands.append(f" network {net.network_address}")
+        commands.append("!")
+    elif protocol == "ospf":
+        commands.append("router ospf 1")
+        for net in _iter_unique_interface_networks(dev_cfg):
+            wildcard = ipaddress.IPv4Address(
+                int(ipaddress.IPv4Address("255.255.255.255")) - int(net.netmask)
+            )
+            commands.append(f" network {net.network_address} {wildcard} area 0")
+        commands.append("!")
+    elif protocol == "eigrp":
+        commands.append("router eigrp 100")
+        for net in _iter_unique_interface_networks(dev_cfg):
+            wildcard = ipaddress.IPv4Address(
+                int(ipaddress.IPv4Address("255.255.255.255")) - int(net.netmask)
+            )
+            commands.append(f" network {net.network_address} {wildcard}")
+        commands.append(" no auto-summary")
         commands.append("!")
     elif protocol == "static":
         routes = dev_cfg.get("routes") or calculate_static_routes(name, all_devices, links_config)

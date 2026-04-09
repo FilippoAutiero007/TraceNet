@@ -141,3 +141,42 @@ def test_entrypoint_router_dhcp_prefers_request_dhcp_dns_over_subnet_dns(tmp_pat
 
     assert any(line.lower().startswith("ip dhcp pool ") for line in lines)
     assert "dns-server 192.168.2.3" in lines
+
+
+def test_router_ospf_network_statements_are_generated_once_per_network():
+    dev_cfg = {
+        "name": "Router0",
+        "routing_protocol": "OSPF",
+        "interfaces": [
+            {"name": "FastEthernet0/0", "ip": "192.168.10.1", "mask": "255.255.255.0", "role": "lan"},
+            {"name": "FastEthernet0/1", "ip": "10.0.0.1", "mask": "255.255.255.252", "role": "wan"},
+            {"name": "FastEthernet1/0", "ip": "192.168.10.254", "mask": "255.255.255.0", "role": "lan"},
+        ],
+    }
+
+    lines = generate_router_config(dev_cfg, all_devices=[dev_cfg], links_config=[])
+    joined = "\n".join(lines)
+
+    assert "router ospf 1" in joined
+    assert " network 192.168.10.0 0.0.0.255 area 0" in joined
+    assert " network 10.0.0.0 0.0.0.3 area 0" in joined
+    assert joined.count(" network 192.168.10.0 0.0.0.255 area 0") == 1
+
+
+def test_router_eigrp_network_statements_and_no_auto_summary_are_generated():
+    dev_cfg = {
+        "name": "Router0",
+        "routing_protocol": "EIGRP",
+        "interfaces": [
+            {"name": "FastEthernet0/0", "ip": "172.16.0.1", "mask": "255.255.0.0", "role": "lan"},
+            {"name": "FastEthernet0/1", "ip": "11.0.0.1", "mask": "255.255.255.252", "role": "wan"},
+        ],
+    }
+
+    lines = generate_router_config(dev_cfg, all_devices=[dev_cfg], links_config=[])
+    joined = "\n".join(lines)
+
+    assert "router eigrp 100" in joined
+    assert " network 172.16.0.0 0.0.255.255" in joined
+    assert " network 11.0.0.0 0.0.0.3" in joined
+    assert " no auto-summary" in joined
