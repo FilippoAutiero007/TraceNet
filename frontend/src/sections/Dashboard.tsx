@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, Plus, Settings, Activity, Download, Pause, RotateCcw } from 'lucide-react';
+import { Play, Plus, Settings, Activity, Download, Pause, RotateCcw } from 'lucide-react';
 import { useNetworkSimulation } from '@/hooks/useNetworkSimulation';
 import { Slider } from '@/components/ui/slider';
 

@@ -201,6 +201,8 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             "dns_records": request.dns_records or [],
             "server_services": request.server_services or [],
             "servers_config": [s.model_dump() for s in (request.servers_config or [])],
+            "vlans": [v.model_dump() for v in (request.vlans or [])],
+            "acl": [a.model_dump() for a in (request.acl or [])],
             "pcs_config": [p.model_dump() for p in (request.pcs_config or [])],
         }
 

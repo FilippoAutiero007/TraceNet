@@ -5,16 +5,33 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from collections import defaultdict
 
 from app.services.pkt_crypto import decrypt_pkt_data
 from .template import get_pkt_generator, get_template_path
 from .topology import build_links_config
 from .utils import safe_name
 from .config_generator import calculate_static_routes
+from .network_plan import (
+    alloc_ip,
+    apply_switch_port_roles,
+    attach_acl_to_router_interfaces,
+    assign_router_lan_interfaces,
+    assign_router_wan_interfaces,
+    build_lan_segments,
+    build_mail_server_by_switch,
+    build_switch_segment_maps,
+    collect_host_switch_links,
+    default_vlan_id,
+    init_mail_user_counters,
+    is_router_on_a_stick,
+    map_segments_to_vlans,
+    normalize_vlans,
+    segment_for_host,
+)
 from .server_config import build_server_configs
 from .server_mail import get_mail_users_and_domain
 from .server_services import has_service, normalize_services
@@ -130,185 +147,65 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             devices_config.append(sw_cfg)
             switches_config.append(sw_cfg)
 
-        # Build LAN segments (VLSM results) used for router LAN interfaces and host addressing.
-        lan_segments: list[dict[str, Any]] = []
-        for subnet in subnets:
-            usable_range = getattr(subnet, "usable_range", None)
-            if not isinstance(usable_range, list) or len(usable_range) != 2:
-                continue
-            try:
-                start_ip = ipaddress.ip_address(str(usable_range[0]))
-                end_ip = ipaddress.ip_address(str(usable_range[1]))
-            except ValueError:
-                continue
+        lan_segments = build_lan_segments(subnets, dhcp_dns)
+        vlan_sequence = normalize_vlans(vlans_global)
+        segment_by_vlan_id = map_segments_to_vlans(lan_segments, vlan_sequence)
+        router_on_a_stick = is_router_on_a_stick(
+            vlan_sequence,
+            num_switches=num_switches,
+            lan_segments=lan_segments,
+            num_routers=num_routers,
+        )
+        switch_to_lan, switch_to_segments = build_switch_segment_maps(
+            switches_config,
+            lan_segments,
+            router_on_a_stick=router_on_a_stick,
+        )
 
-            mask = str(getattr(subnet, "mask", "255.255.255.0"))
-            # Gateway: use VLSM gateway if present; else fallback to "first usable" by convention.
-            vlsm_gw = getattr(subnet, "gateway", None)
-            try:
-                gw_ip = ipaddress.ip_address(str(vlsm_gw)) if vlsm_gw else start_ip
-            except ValueError:
-                gw_ip = start_ip
-
-            lan_segments.append(
-                {
-                    "name": str(getattr(subnet, "name", "")),
-                    "network": str(getattr(subnet, "network", "")),
-                    "mask": mask,
-                    "gateway": str(gw_ip),
-                    "dns_server": dhcp_dns if dhcp_dns else getattr(subnet, "dns_server", None),
-                    "start_ip": start_ip,
-                    "end_ip": end_ip,
-                    "next_ip": start_ip,
-                }
-            )
-
-        def _switch_index(switch_name: str) -> int:
-            if switch_name.startswith("Switch"):
-                try:
-                    return int(switch_name.replace("Switch", ""))
-                except ValueError:
-                    return 0
-            return 0
-
-        switch_to_lan: dict[str, dict[str, Any]] = {}
-        if lan_segments:
-            for sw in switches_config:
-                seg = lan_segments[_switch_index(sw["name"]) % len(lan_segments)]
-                switch_to_lan[sw["name"]] = seg
-
-        # Helper: add/update router interface config (so config_generator can build IOS config).
-        def _set_router_iface(
-            router_cfg: dict[str, Any],
-            if_name: str,
-            *,
-            ip: str,
-            mask: str,
-            role: str,
-            dns_server: str | None = None,
-        ) -> None:
-            interfaces = router_cfg.setdefault("interfaces", [])
-            iface_ip = router_cfg.setdefault("interface_ips", {})
-            iface_ip[str(if_name)] = str(ip)
-            for entry in interfaces:
-                if str(entry.get("name", "")) == if_name:
-                    entry.update({"ip": str(ip), "mask": str(mask), "role": role})
-                    if dns_server is not None:
-                        entry["dns_server"] = str(dns_server)
-                    break
-            else:
-                iface_entry = {"name": str(if_name), "ip": str(ip), "mask": str(mask), "role": role}
-                if dns_server is not None:
-                    iface_entry["dns_server"] = str(dns_server)
-                interfaces.append(iface_entry)
-
-            # Backward-compat: ensure base router ip/subnet exists for downstream code.
-            if role == "lan" and not router_cfg.get("ip"):
-                router_cfg["ip"] = str(ip)
-                router_cfg["subnet"] = str(mask)
-                router_cfg["gateway_ip"] = str(ip)
-
-        # 1) Assign router LAN interfaces from router->switch links.
-        for link in links_config:
-            frm = str(link.get("from", ""))
-            to = str(link.get("to", ""))
-            if not (frm.startswith("Router") and to.startswith("Switch")):
-                continue
-            router_name = frm
-            switch_name = to
-            router_port = str(link.get("from_port", "")).strip()
-            if not router_port:
-                continue
-            seg = switch_to_lan.get(switch_name)
-            if seg is None:
-                continue
-            router_cfg = next((r for r in routers_config if r["name"] == router_name), None)
-            if router_cfg is None:
-                continue
-            _set_router_iface(
-                router_cfg,
-                router_port,
-                ip=seg["gateway"],
-                mask=seg["mask"],
-                role="lan",
-                dns_server=seg.get("dns_server"),
-            )
+        assign_router_lan_interfaces(
+            links_config,
+            routers_config,
+            switch_to_lan,
+            switch_to_segments,
+            router_on_a_stick=router_on_a_stick,
+        )
 
         # 2) Assign router WAN interfaces for router-router links.
         # L'utente può specificare wan_network e wan_prefix in topology config.
         wan_network_str = topology_cfg.get("wan_network", "11.0.0.0")
-        wan_prefix = int(topology_cfg.get("wan_prefix", 30))
-        try:
-            wan_base = ipaddress.ip_network(f"{wan_network_str}/{wan_prefix}", strict=False)
-            block_size = 2 ** (32 - wan_prefix)
-        except Exception:
-            wan_base = ipaddress.ip_network("11.0.0.0/30", strict=False)
-            block_size = 4
-            wan_prefix = 30
+        wan_prefix = assign_router_wan_interfaces(
+            links_config,
+            routers_config,
+            wan_network_str=str(wan_network_str),
+            wan_prefix=int(topology_cfg.get("wan_prefix", 30)),
+        )
 
-        rr_links = [
-            l
-            for l in links_config
-            if str(l.get("from", "")).startswith("Router") and str(l.get("to", "")).startswith("Router")
-        ]
-        for idx, link in enumerate(rr_links):
-            net_addr = int(wan_base.network_address) + (idx * block_size)
-            try:
-                net = ipaddress.IPv4Network((ipaddress.IPv4Address(net_addr), wan_prefix), strict=False)
-            except Exception:
-                break
-            from_router = str(link.get("from"))
-            to_router = str(link.get("to"))
-            from_port = str(link.get("from_port", "")).strip()
-            to_port = str(link.get("to_port", "")).strip()
-            if not from_port or not to_port:
-                continue
-            ip1 = str(ipaddress.IPv4Address(int(net.network_address) + 1))
-            ip2 = str(ipaddress.IPv4Address(int(net.network_address) + 2))
-            mask = str(net.netmask)
-            r1 = next((r for r in routers_config if r["name"] == from_router), None)
-            r2 = next((r for r in routers_config if r["name"] == to_router), None)
-            if r1:
-                _set_router_iface(r1, from_port, ip=ip1, mask=mask, role="wan")
-            if r2:
-                _set_router_iface(r2, to_port, ip=ip2, mask=mask, role="wan")
+        attach_acl_to_router_interfaces(routers_config, acl_global)
 
         # 3) Host (PC/Server) address allocation by switch LAN; PCs become DHCP clients if requested.
-        link_to_switch: dict[str, str] = {}
-        link_to_switch_port: dict[str, str] = {}
-        for link in links_config:
-            frm = str(link.get("from", ""))
-            to = str(link.get("to", ""))
-            if frm.startswith("Switch") and (to.startswith("PC") or to.startswith("Server")):
-                link_to_switch[to] = frm
-                link_to_switch_port[to] = str(link.get("from_port", "")).strip()
-
-        # Default VLAN selection for access ports when VLANs are present.
-        default_vlan_id: int | None = None
-        for v in vlans_global:
-            try:
-                default_vlan_id = int(v.get("id", v.get("vlan_id")))
-                break
-            except Exception:
-                continue
-
-        def _alloc_ip(seg: dict[str, Any]) -> str | None:
-            nxt = seg.get("next_ip")
-            if not isinstance(nxt, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
-                return None
-            if int(nxt) > int(seg["end_ip"]):
-                return None
-            seg["next_ip"] = ipaddress.ip_address(int(nxt) + 1)
-            return str(nxt)
+        link_to_switch, link_to_switch_port = collect_host_switch_links(links_config)
+        fallback_vlan_id = default_vlan_id(vlans_global)
 
         # Allocate servers first (static IPs are useful for DNS/HTTP).
         for srv_idx in range(num_servers):
             name = safe_name("Server", srv_idx)
             switch = link_to_switch.get(name)
-            seg = switch_to_lan.get(switch) if switch else (lan_segments[srv_idx % len(lan_segments)] if lan_segments else None)
+            explicit_server_cfg = (
+                servers_config_list[srv_idx]
+                if srv_idx < len(servers_config_list) and isinstance(servers_config_list[srv_idx], dict)
+                else {}
+            )
+            seg = segment_for_host(
+                switch,
+                explicit_cfg=explicit_server_cfg,
+                fallback_index=srv_idx,
+                switch_to_segments=switch_to_segments,
+                lan_segments=lan_segments,
+                segment_by_vlan_id=segment_by_vlan_id,
+            )
             srv_cfg: dict[str, Any] = {"name": name, "type": "server"}
             if seg is not None:
-                ip = _alloc_ip(seg)
+                ip = alloc_ip(seg)
                 if ip:
                     srv_cfg.update(
                         {
@@ -318,6 +215,8 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                             "network": seg.get("network", ""),
                         }
                     )
+                    if seg.get("vlan_id") is not None:
+                        srv_cfg["vlan_id"] = seg["vlan_id"]
             devices_config.append(srv_cfg)
 
         build_server_configs(
@@ -464,36 +363,36 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     break
 
         # Mail servers per LAN (switch): necessari per EMAIL_CLIENT sui PC della stessa rete.
-        mail_server_by_switch: dict[str, dict[str, Any]] = {}
-        for dev in devices_config:
-            if str(dev.get("type", "")).lower() != "server":
-                continue
-            services = normalize_services(dev.get("server_services"))
-            if not {"smtp", "pop3", "email"}.intersection(services):
-                continue
-            server_name = str(dev.get("name", ""))
-            switch_name = link_to_switch.get(server_name)
-            if not switch_name:
-                continue
-            if not str(dev.get("ip", "")).strip():
-                continue
-            # Primo server mail per LAN vince (comportamento stabile).
-            mail_server_by_switch.setdefault(switch_name, dev)
-
-        # Contatori progressivi user1, user2, ... per LAN.
-        mail_user_counter_by_switch: dict[str, int] = defaultdict(int)
+        mail_server_by_switch = build_mail_server_by_switch(
+            devices_config,
+            link_to_switch,
+            normalize_services,
+        )
+        mail_user_counter_by_switch = init_mail_user_counters()
 
         while pc_idx < num_pcs:
             name = safe_name("PC", pc_idx)
             switch = link_to_switch.get(name)
-            seg = switch_to_lan.get(switch) if switch else (
-                lan_segments[pc_idx % len(lan_segments)] if lan_segments else None
+            explicit_pc_cfg = (
+                pcs_config_list[pc_idx]
+                if pc_idx < len(pcs_config_list) and isinstance(pcs_config_list[pc_idx], dict)
+                else {}
+            )
+            seg = segment_for_host(
+                switch,
+                explicit_cfg=explicit_pc_cfg,
+                fallback_index=pc_idx,
+                switch_to_segments=switch_to_segments,
+                lan_segments=lan_segments,
+                segment_by_vlan_id=segment_by_vlan_id,
             )
 
             pc_cfg: dict[str, Any] = {
                 "name": name,
                 "type": "pc",
             }
+            if seg is not None and seg.get("vlan_id") is not None:
+                pc_cfg["vlan_id"] = seg["vlan_id"]
 
             # Decide la modalità IP per il PC: DHCP vs static
             if dhcp_from_router or has_dhcp_server:
@@ -510,7 +409,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     pc_cfg["dhcp_server_ip"] = dhcp_srv_ip
 
             elif seg is not None:
-                ip = _alloc_ip(seg)
+                ip = alloc_ip(seg)
                 if ip:
                     pc_cfg.update(
                         {
@@ -527,11 +426,6 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                 users, domain = get_mail_users_and_domain(mail_srv)
                 users_by_name = {u["username"]: u["password"] for u in users}
 
-                explicit_pc_cfg = (
-                    pcs_config_list[pc_idx]
-                    if pc_idx < len(pcs_config_list) and isinstance(pcs_config_list[pc_idx], dict)
-                    else {}
-                )
                 explicit_user = str(explicit_pc_cfg.get("mail_user") or "").strip()
                 explicit_password = str(explicit_pc_cfg.get("mail_password") or "").strip()
 
@@ -564,46 +458,16 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
 
 
         # 4) Switch VLAN port roles (best-effort; trunks only if VLANs are provided).
-        switches_by_name = {sw["name"]: sw for sw in switches_config}
-        for host_name, sw_name in link_to_switch.items():
-            sw = switches_by_name.get(sw_name)
-            if sw is None:
-                continue
-            port = link_to_switch_port.get(host_name) or ""
-            if not port:
-                continue
-            vid = None
-            # Try to read explicit vlan_id from the host config (if user provided it).
-            host = next((d for d in devices_config if d.get("name") == host_name), None)
-            if host is not None and host.get("vlan_id") is not None:
-                try:
-                    vid = int(host["vlan_id"])
-                except Exception:
-                    vid = None
-            if vid is None and default_vlan_id is not None:
-                vid = default_vlan_id
-            if vid is not None:
-                sw.setdefault("access_ports", {})[port] = vid
-
-        if vlans_global:
-            for link in links_config:
-                frm = str(link.get("from", ""))
-                to = str(link.get("to", ""))
-                if frm.startswith("Switch") and to.startswith("Router"):
-                    sw = switches_by_name.get(frm)
-                    if sw:
-                        sw.setdefault("trunk_ports", []).append(str(link.get("from_port", "")).strip() or "FastEthernet0/1")
-                if frm.startswith("Router") and to.startswith("Switch"):
-                    sw = switches_by_name.get(to)
-                    if sw:
-                        sw.setdefault("trunk_ports", []).append(str(link.get("to_port", "")).strip() or "FastEthernet0/1")
-                if frm.startswith("Switch") and to.startswith("Switch"):
-                    sw1 = switches_by_name.get(frm)
-                    sw2 = switches_by_name.get(to)
-                    if sw1:
-                        sw1.setdefault("trunk_ports", []).append(str(link.get("from_port", "")).strip())
-                    if sw2:
-                        sw2.setdefault("trunk_ports", []).append(str(link.get("to_port", "")).strip())
+        apply_switch_port_roles(
+            switches_config,
+            link_to_switch,
+            link_to_switch_port,
+            devices_config,
+            links_config,
+            vlans_global=vlans_global,
+            vlan_sequence=vlan_sequence,
+            default_vlan=fallback_vlan_id,
+        )
 
         # 5) Static routes: compute automatically after interfaces are populated.
         protocol_norm = routing_protocol.strip().lower()

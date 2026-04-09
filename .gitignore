@@ -53,8 +53,20 @@ logs/
 *.pkt
 !backend/templates/*.pkt
 *.xml
+*.bak
+*.backup
 /tmp/
 /test_output*/
+/tmp_step1/
+/backend/tmp_step1/
+/backend/debug_*.xml
+/backend/debug_routing_out
+/out.txt
+/test_out.txt
+/fix_*.py
+/check_*.py
+/debug_*.py
+/tmp_*.py
 
 # Frontend specific
 nettrace/.env*

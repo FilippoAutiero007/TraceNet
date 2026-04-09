@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiClient, getApiBaseUrl } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
 import { DownloadResult } from '@/components/DownloadResult';
 import { SEOHead } from '@/components/SEOHead';
@@ -39,6 +39,26 @@ interface ParseResponse {
   json: Record<string, unknown>;
 }
 
+interface DownloadResultData {
+  success: true;
+  message: string;
+  pkt_download_url: string;
+  xml_download_url?: string;
+  config_summary: ConfigSummary;
+  subnets: SubnetInfo[];
+}
+
+function isDownloadResultData(result: GenerateResponse | null): result is DownloadResultData {
+  return Boolean(
+    result &&
+    result.success &&
+    result.message &&
+    result.pkt_download_url &&
+    result.config_summary &&
+    result.subnets
+  );
+}
+
 export function Generator() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerateResponse | null>(null);
@@ -53,7 +73,7 @@ export function Generator() {
     const apiBaseUrl = getApiBaseUrl();
 
     try {
-      const parseResponse = await fetch(`${API_URL}/api/parse-network-request`, {
+      const parseResponse = await fetch(`${apiBaseUrl}/api/parse-network-request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -80,7 +100,7 @@ export function Generator() {
 
       setConversationState(parseData.json);
 
-      const generationResponse = await fetch(`${API_URL}/api/generate-pkt`, {
+      const generationResponse = await fetch(`${apiBaseUrl}/api/generate-pkt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -163,8 +183,8 @@ export function Generator() {
             </div>
 
             <div className="space-y-6">
-              {result && result.success && result.config_summary && result.subnets ? (
-                <DownloadResult data={result as any} />
+              {isDownloadResultData(result) ? (
+                <DownloadResult data={result} />
               ) : (
                 <div className="flex items-center justify-center h-full min-h-[400px] bg-slate-900 rounded-lg border border-slate-800">
                   <div className="text-center text-slate-500 p-8">

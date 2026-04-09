@@ -5,9 +5,11 @@ import logging
 from collections import deque
 from typing import Any, Iterable, Optional
 
+from .acl_utils import render_acl_endpoint, render_acl_port
 from .server_services import normalize_services
 
 logger = logging.getLogger(__name__)
+
 
 def _as_ipv4_network(ip: str, mask: str) -> Optional[ipaddress.IPv4Network]:
     try:
@@ -306,23 +308,14 @@ def generate_router_config(
         if acl_type in {"standard", "std"}:
             acl_id = str(acl.get("id", acl.get("number", "10"))).strip() or "10"
             for rule in acl.get("rules") or acl.get("entries") or []:
+                remark = str(rule.get("remark", "")).strip()
+                if remark:
+                    commands.append(f"access-list {acl_id} remark {remark}")
                 action = str(rule.get("action", "permit")).strip().lower()
-                src = str(rule.get("source", rule.get("src", ""))).strip()
-                wc = str(rule.get("wildcard", "")).strip()
+                src = render_acl_endpoint(rule, "src")
                 if not src:
                     continue
-                if not wc:
-                    # If a mask was provided, convert to wildcard; else assume host.
-                    mask = str(rule.get("mask", "")).strip()
-                    if mask:
-                        try:
-                            wc = str(ipaddress.IPv4Address(int(ipaddress.IPv4Address("255.255.255.255")) - int(ipaddress.IPv4Address(mask))))
-                        except Exception:
-                            wc = ""
-                if wc:
-                    commands.append(f"access-list {acl_id} {action} {src} {wc}")
-                else:
-                    commands.append(f"access-list {acl_id} {action} {src}")
+                commands.append(f"access-list {acl_id} {action} {src}")
             if acl.get("deny_any", True):
                 commands.append(f"access-list {acl_id} deny any")
             commands.append("!")
@@ -330,19 +323,20 @@ def generate_router_config(
             acl_name = str(acl.get("name", acl.get("id", "ACL"))).strip() or "ACL"
             commands.append(f"ip access-list extended {acl_name}")
             for rule in acl.get("rules") or acl.get("entries") or []:
+                remark = str(rule.get("remark", "")).strip()
+                if remark:
+                    commands.append(f" remark {remark}")
                 line = str(rule.get("line", "")).strip()
                 if line:
                     commands.append(f" {line}")
                     continue
                 action = str(rule.get("action", "permit")).strip().lower()
                 proto = str(rule.get("proto", rule.get("protocol", "ip"))).strip().lower()
-                src = str(rule.get("src", rule.get("source", "any"))).strip() or "any"
-                dst = str(rule.get("dst", rule.get("destination", "any"))).strip() or "any"
-                dport = rule.get("dport", rule.get("dest_port"))
-                if dport:
-                    commands.append(f" {action} {proto} {src} {dst} eq {dport}")
-                else:
-                    commands.append(f" {action} {proto} {src} {dst}")
+                src = render_acl_endpoint(rule, "src")
+                dst = render_acl_endpoint(rule, "dst")
+                sport = render_acl_port(rule, "src")
+                dport = render_acl_port(rule, "dst")
+                commands.append(f" {action} {proto} {src}{sport} {dst}{dport}")
             commands.append("!")
 
     # Interfaces
@@ -354,12 +348,20 @@ def generate_router_config(
 
     # Track directly-connected networks for routing protocols
     connected_nets: set[str] = set()
+    parent_interfaces_seen: set[str] = set()
     for iface in interfaces:
         if_name = str(iface.get("name", "")).strip()
         ip = str(iface.get("ip", "")).strip()
         mask = str(iface.get("mask", "")).strip()
         if not if_name:
             continue
+        if "." in if_name:
+            parent_if = if_name.split(".", 1)[0]
+            if parent_if not in parent_interfaces_seen:
+                parent_interfaces_seen.add(parent_if)
+                commands.append(f"interface {parent_if}")
+                commands.append(" no shutdown")
+                commands.append("!")
         commands.append(f"interface {if_name}")
         encap = str(iface.get("encapsulation", "")).strip()
         if encap:
@@ -541,6 +543,25 @@ def generate_switch_config(dev_cfg: dict[str, Any], vlans: list[dict[str, Any]] 
             continue
 
     trunk_ports = [str(p) for p in (dev_cfg.get("trunk_ports") or []) if p]
+    trunk_allowed_vlans = dev_cfg.get("trunk_allowed_vlans") or []
+    allowed_vlan_ids: list[int] = []
+    for vid in trunk_allowed_vlans:
+        try:
+            allowed_vlan_ids.append(int(vid))
+        except Exception:
+            continue
+    if not allowed_vlan_ids:
+        allowed_vlan_ids = sorted(vlan_defs)
+
+    native_vlan: int | None = None
+    for v in (vlans or []) + (dev_cfg.get("vlans") or []):
+        try:
+            vid = int(v.get("id", v.get("vlan_id")))
+        except Exception:
+            continue
+        if bool(v.get("native")):
+            native_vlan = vid
+            break
 
     # Create VLANs
     for vid in sorted(vlan_defs):
@@ -563,6 +584,11 @@ def generate_switch_config(dev_cfg: dict[str, Any], vlans: list[dict[str, Any]] 
     for port in sorted(set(trunk_ports)):
         commands.append(f"interface {port}")
         commands.append(" switchport mode trunk")
+        if native_vlan is not None:
+            commands.append(f" switchport trunk native vlan {native_vlan}")
+        if allowed_vlan_ids:
+            allowed = ",".join(str(vid) for vid in sorted(set(allowed_vlan_ids)))
+            commands.append(f" switchport trunk allowed vlan {allowed}")
         commands.append("!")
 
     commands.append("end")

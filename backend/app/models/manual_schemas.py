@@ -6,12 +6,14 @@ Bypasses NLP parsing for deterministic, fast generation
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.models.schemas import (
+    AclConfig,
     RoutingProtocol,
     DeviceConfig,
     PcConfig,
     ServerConfig,
     SubnetRequest,
     TopologyConfig,
+    VlanConfig,
 )
 
 
@@ -50,6 +52,14 @@ class ManualNetworkRequest(BaseModel):
     servers_config: Optional[List[ServerConfig]] = Field(
         default=None,
         description="Per-server configuration (services, hostname, dns_records, dhcp_pools, mail users...)",
+    )
+    vlans: Optional[List[VlanConfig]] = Field(
+        default=None,
+        description="VLAN definitions for switches/router-on-a-stick",
+    )
+    acl: Optional[List[AclConfig]] = Field(
+        default=None,
+        description="ACL definitions for routers",
     )
     pcs_config: Optional[List[PcConfig]] = Field(
         default=None,

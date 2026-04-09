@@ -175,6 +175,8 @@ class VlanConfig(BaseModel):
     """Optional VLAN configuration for switches/router-on-a-stick (best-effort schema)."""
     id: int = Field(..., ge=1, le=4094, description="VLAN ID")
     name: Optional[str] = Field(default=None, description="VLAN name")
+    subnet_name: Optional[str] = Field(default=None, description="Associated logical subnet name")
+    native: bool = Field(default=False, description="Whether this VLAN is native on trunks")
 
     model_config = ConfigDict(extra="allow")
 
@@ -221,11 +223,15 @@ class ServerConfig(BaseModel):
     def normalize_services(cls, value: Any) -> List[str]:
         return _normalize_service_list(value)
 
+    model_config = ConfigDict(extra="allow")
+
 
 
 class PcConfig(BaseModel):
     mail_user: Optional[str] = Field(default=None)
     mail_password: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="allow")
 
 
 class NormalizedNetworkRequest(BaseModel):  

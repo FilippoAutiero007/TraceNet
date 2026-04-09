@@ -15,7 +15,7 @@ const spinnerVariants = {
       transition: {
         duration: 1,
         repeat: Infinity,
-        ease: "linear"
+        ease: "linear" as const
       }
     }
   },
@@ -25,7 +25,7 @@ const spinnerVariants = {
       transition: {
         duration: 0.8,
         repeat: Infinity,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   },
@@ -36,7 +36,7 @@ const spinnerVariants = {
       transition: {
         duration: 1.5,
         repeat: Infinity,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   }
