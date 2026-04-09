@@ -22,7 +22,7 @@ from .network_plan import (
     assign_router_lan_interfaces,
     assign_router_wan_interfaces,
     build_lan_segments,
-    build_mail_server_by_switch,
+    build_mail_server_index,
     build_switch_segment_maps,
     collect_host_switch_links,
     default_vlan_id,
@@ -30,6 +30,7 @@ from .network_plan import (
     is_router_on_a_stick,
     map_segments_to_vlans,
     normalize_vlans,
+    resolve_mail_server,
     segment_for_host,
 )
 from .server_config import build_server_configs
@@ -363,7 +364,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     break
 
         # Mail servers per LAN (switch): necessari per EMAIL_CLIENT sui PC della stessa rete.
-        mail_server_by_switch = build_mail_server_by_switch(
+        mail_server_index = build_mail_server_index(
             devices_config,
             link_to_switch,
             normalize_services,
@@ -421,7 +422,17 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     )
 
             # Configurazione client email sul PC se nella stessa LAN di un server mail.
-            mail_srv = mail_server_by_switch.get(switch or "")
+            pc_vlan_id = pc_cfg.get("vlan_id")
+            try:
+                resolved_vlan_id = int(pc_vlan_id) if pc_vlan_id is not None else None
+            except Exception:
+                resolved_vlan_id = None
+
+            mail_srv = resolve_mail_server(
+                mail_server_index,
+                switch_name=switch,
+                vlan_id=resolved_vlan_id,
+            )
             if mail_srv is not None:
                 users, domain = get_mail_users_and_domain(mail_srv)
                 users_by_name = {u["username"]: u["password"] for u in users}
@@ -442,11 +453,12 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
                     pc_cfg["mail_server_ip"] = str(mail_srv.get("ip", "")).strip()
                 else:
                     # Assegna utente solo se esiste nel server (non oltre len(users))
-                    counter = mail_user_counter_by_switch[switch or ""]
+                    counter_key = f"{switch or ''}:{resolved_vlan_id if resolved_vlan_id is not None else 'any'}"
+                    counter = mail_user_counter_by_switch[counter_key]
                     if counter < len(users):
                         selected_user = users[counter]["username"]
                         selected_password = users[counter]["password"]
-                        mail_user_counter_by_switch[switch or ""] += 1
+                        mail_user_counter_by_switch[counter_key] += 1
                         pc_cfg["mail_username"] = selected_user
                         pc_cfg["mail_password"] = selected_password
                         pc_cfg["mail_domain"] = domain

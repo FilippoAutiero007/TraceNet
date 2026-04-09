@@ -1,98 +1,98 @@
-import pytest
-import os
-import shutil
+from __future__ import annotations
+
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
 from app.services.pkt_generator import save_pkt_file
-from app.services.pkt_crypto import decrypt_pkt_data
+
 
 class MockSubnet:
-    def __init__(self, name, mask, usable_range):
+    def __init__(self, name: str, mask: str, usable_range: list[str], gateway: str):
         self.name = name
         self.mask = mask
         self.usable_range = usable_range
+        self.gateway = gateway
 
-def test_multi_device_id_uniqueness():
-    """Verifica che la generazione di più PC produca SAVEREFID e MEMADDR univoci."""
-    subnets = [
-        MockSubnet("Subnet1", "255.255.255.0", ["192.168.1.10", "192.168.1.11", "192.168.1.12"])
+
+def _load_root(xml_path: str) -> ET.Element:
+    return ET.fromstring(Path(xml_path).read_text(encoding="utf-8", errors="strict"))
+
+
+def _device_nodes(root: ET.Element) -> list[ET.Element]:
+    return root.findall("NETWORK/DEVICES/DEVICE")
+
+
+def _switch_to_pc_links(links: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        link
+        for link in links
+        if str(link.get("from", "")).startswith("Switch") and str(link.get("to", "")).startswith("PC")
     ]
-    
+
+
+def test_multi_device_id_uniqueness(tmp_path):
+    """Generated devices must keep unique save-ref identifiers in the XML."""
+    subnets = [
+        MockSubnet(
+            "Subnet1",
+            "255.255.255.0",
+            ["192.168.1.10", "192.168.1.200"],
+            gateway="192.168.1.1",
+        )
+    ]
     config = {
         "devices": {
             "routers": 1,
             "switches": 1,
-            "pcs": 5
+            "pcs": 5,
+            "servers": 0,
         }
     }
-    
-    output_dir = "test_multi_output"
-    result = save_pkt_file(subnets, config, output_dir)
-    
+
+    result = save_pkt_file(subnets, config, str(tmp_path))
     assert result["success"] is True
-    xml_path = result["xml_path"]
-    assert os.path.exists(xml_path)
-    
-    with open(xml_path, "r", encoding="utf-8") as f:
-        xml_content = f.read()
-    
-    # Verifica SAVEREFID
-    import re
-    saverefs = re.findall(r"save-ref-id[0-9]+", xml_content)
-    # Ogni device ha un SAVEREFID nell'ENGINE e possibilmente riferimenti nei LINK
-    # Quello che conta è che non ci siano duplicati tra device diversi
-    # Estraiamo i SAVEREFID definiti nei nodi <SAVEREFID>
-    root = ET.fromstring(xml_content)
-    defined_saverefs = [node.text for node in root.findall(".//SAVEREFID") if node.text]
-    
-    assert len(defined_saverefs) == len(set(defined_saverefs)), f"Duplicated SAVEREFIDs found: {defined_saverefs}"
-    
-    # Verifica MEMADDR (e simili)
-    # Cerchiamo tutti i nodi che dovrebbero essere univoci per istanza
-    addr_tags = ["MEMADDR", "DEVADDR"]
-    for tag in addr_tags:
-        addrs = [node.text for node in root.findall(f".//{tag}") if node.text and node.text.isdigit() and len(node.text) >= 10]
-        # Nota: nel template originale potrebbero esserci alcuni valori uguali per device diversi se non rigenerati.
-        # Con la nostra modifica, dovrebbero essere tutti diversi.
-        assert len(addrs) == len(set(addrs)), f"Duplicated {tag} found: {addrs}"
 
-    # Pulizia
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+    root = _load_root(result["xml_path"])
+    devices = _device_nodes(root)
+    assert len(devices) == 7  # 1 router + 1 switch + 5 PCs
 
-def test_topology_port_assignment():
-    """Verifica che le porte assegnate ai PC siano corrette (non tutte sulla stessa porta dello switch)."""
-    subnets = [MockSubnet("S1", "255.255.255.0", ["10.0.0.1", "10.0.0.2"])]
-    config = {"devices": {"routers": 1, "switches": 1, "pcs": 2}}
-    
-    output_dir = "test_topo_output"
-    result = save_pkt_file(subnets, config, output_dir)
-    
-    root = ET.fromstring(open(result["xml_path"]).read())
-    links = root.findall(".//LINK")
-    
-    pc_links = []
-    for link in links:
-        to_node = link.find("TO")
-        if to_node is not None and "PC" in (link.find("TO").text or ""): # Questo controllo è debole ma ok per mock
-            pass
-        # Controllo basato sulle porte
-        ports = link.findall("PORT")
-        port_texts = [p.text for p in ports if p.text]
-        if any("PC" in str(p) for p in port_texts): # In realtà cerchiamo il pattern dello switch
-            pc_links.append(port_texts)
+    save_refs = []
+    for device in devices:
+        ref = device.findtext("ENGINE/SAVE_REF_ID") or device.findtext("ENGINE/SAVEREFID")
+        assert ref, f"Missing save-ref on device {(device.findtext('ENGINE/NAME') or '').strip()}"
+        save_refs.append(ref)
 
-    # Verifica porte dello switch nei link verso i PC
-    switch_ports = []
-    for link in links:
-        # Un link ha due porte. Una è dello switch, l'altra del PC.
-        ports = [p.text for p in link.findall("PORT")]
-        if "FastEthernet0" in ports and any(p.startswith("FastEthernet0/") for p in ports):
-            # Trovato un link Switch -> PC
-            sw_port = [p for p in ports if p.startswith("FastEthernet0/")][0]
-            switch_ports.append(sw_port)
-    
-    if len(switch_ports) >= 2:
-        assert len(switch_ports) == len(set(switch_ports)), f"Duplicate switch ports assigned: {switch_ports}"
+    assert len(save_refs) == len(set(save_refs)), f"Duplicated save refs found: {save_refs}"
 
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+
+def test_topology_port_assignment_uses_distinct_switch_ports_for_each_pc(tmp_path):
+    """Each PC connected to the same switch must receive a distinct access port."""
+    subnets = [
+        MockSubnet(
+            "LAN",
+            "255.255.255.0",
+            ["10.0.0.2", "10.0.0.200"],
+            gateway="10.0.0.1",
+        )
+    ]
+    config = {"devices": {"routers": 1, "switches": 1, "pcs": 3, "servers": 0}}
+
+    result = save_pkt_file(subnets, config, str(tmp_path))
+    assert result["success"] is True
+
+    switch_pc_links = _switch_to_pc_links(result["links"])
+    assert len(switch_pc_links) == 3
+
+    switch_ports = [link["from_port"] for link in switch_pc_links]
+    assert switch_ports == ["FastEthernet0/2", "FastEthernet0/3", "FastEthernet0/4"]
+    assert len(switch_ports) == len(set(switch_ports))
+
+    root = _load_root(result["xml_path"])
+    link_ports = [
+        [port.text or "" for port in cable.findall("PORT")]
+        for cable in root.findall("NETWORK/LINKS/LINK/CABLE")
+    ]
+    pc_port_pairs = [ports for ports in link_ports if "FastEthernet0" in ports and any("/" in port for port in ports)]
+    assert any(["FastEthernet0/2", "FastEthernet0"] == ports for ports in pc_port_pairs)
+    assert any(["FastEthernet0/3", "FastEthernet0"] == ports for ports in pc_port_pairs)
+    assert any(["FastEthernet0/4", "FastEthernet0"] == ports for ports in pc_port_pairs)

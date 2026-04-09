@@ -395,12 +395,12 @@ def apply_switch_port_roles(
             sw["trunk_allowed_vlans"] = allowed_vlans
 
 
-def build_mail_server_by_switch(
+def build_mail_server_index(
     devices_config: list[dict[str, Any]],
     link_to_switch: dict[str, str],
     normalize_services: Any,
-) -> dict[str, dict[str, Any]]:
-    mail_server_by_switch: dict[str, dict[str, Any]] = {}
+) -> dict[tuple[str, int | None], dict[str, Any]]:
+    mail_server_index: dict[tuple[str, int | None], dict[str, Any]] = {}
     for dev in devices_config:
         if str(dev.get("type", "")).lower() != "server":
             continue
@@ -411,8 +411,25 @@ def build_mail_server_by_switch(
         switch_name = link_to_switch.get(server_name)
         if not switch_name or not str(dev.get("ip", "")).strip():
             continue
-        mail_server_by_switch.setdefault(switch_name, dev)
-    return mail_server_by_switch
+        raw_vlan = dev.get("vlan_id")
+        try:
+            vlan_id = int(raw_vlan) if raw_vlan is not None else None
+        except Exception:
+            vlan_id = None
+        mail_server_index.setdefault((switch_name, vlan_id), dev)
+        mail_server_index.setdefault((switch_name, None), dev)
+    return mail_server_index
+
+
+def resolve_mail_server(
+    mail_server_index: dict[tuple[str, int | None], dict[str, Any]],
+    *,
+    switch_name: str | None,
+    vlan_id: int | None,
+) -> dict[str, Any] | None:
+    if not switch_name:
+        return None
+    return mail_server_index.get((switch_name, vlan_id)) or mail_server_index.get((switch_name, None))
 
 
 def init_mail_user_counters() -> dict[str, int]:

@@ -280,3 +280,67 @@ def test_pc_email_client_uses_mail_server_ip(tmp_path, monkeypatch):
     assert (email.findtext("INCOMING_MAIL_SERVER") or "").strip() == server_ip
     assert (email.findtext("OUTGOING_MAIL_SERVER") or "").strip() == server_ip
     assert (email.findtext("USERNAME") or "").strip() == "user1"
+
+
+def test_pc_email_client_uses_mail_server_from_same_vlan(tmp_path, monkeypatch):
+    template_path = Path(__file__).resolve().parent.parent / "templates" / "simple_ref.pkt"
+    monkeypatch.setenv("PKT_TEMPLATE_PATH", str(template_path))
+
+    subnets = [
+        MockSubnet(
+            "Admin",
+            "255.255.255.0",
+            ["192.168.10.2", "192.168.10.126"],
+            gateway="192.168.10.1",
+        ),
+        MockSubnet(
+            "Guest",
+            "255.255.255.0",
+            ["192.168.20.2", "192.168.20.126"],
+            gateway="192.168.20.1",
+        ),
+    ]
+    config = {
+        "devices": {"routers": 1, "switches": 1, "pcs": 2, "servers": 2},
+        "routing_protocol": "static",
+        "vlans": [
+            {"id": 10, "name": "ADMIN"},
+            {"id": 20, "name": "GUEST"},
+        ],
+        "servers_config": [
+            {
+                "services": ["email"],
+                "vlan_id": 10,
+                "mail_domain": "admin.local",
+                "mail_users": [{"username": "admin1", "password": "pw-admin"}],
+            },
+            {
+                "services": ["email"],
+                "vlan_id": 20,
+                "mail_domain": "guest.local",
+                "mail_users": [{"username": "guest1", "password": "pw-guest"}],
+            },
+        ],
+        "pcs_config": [
+            {"vlan_id": 10},
+            {"vlan_id": 20},
+        ],
+    }
+
+    result = save_pkt_file(subnets, config, str(tmp_path))
+    assert result["success"] is True
+
+    devices = {device["name"]: device for device in result["devices"]}
+    server0 = devices["Server0"]
+    server1 = devices["Server1"]
+    pc0 = devices["PC0"]
+    pc1 = devices["PC1"]
+
+    assert server0["vlan_id"] == 10
+    assert server1["vlan_id"] == 20
+    assert pc0["mail_server_ip"] == server0["ip"]
+    assert pc1["mail_server_ip"] == server1["ip"]
+    assert pc0["mail_username"] == "admin1"
+    assert pc1["mail_username"] == "guest1"
+    assert pc0["mail_domain"] == "admin.local"
+    assert pc1["mail_domain"] == "guest.local"

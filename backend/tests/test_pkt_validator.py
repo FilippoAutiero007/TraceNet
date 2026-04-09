@@ -77,7 +77,7 @@ def test_validate_pkt_xml_missing_ref():
         """
     )
 
-    with pytest.raises(OrphanLinkEndpointError):
+    with pytest.raises(OrphanLinkEndpointError, match="save-ref-id:999"):
         validate_pkt_xml(root)
 
 
@@ -93,5 +93,5 @@ def test_validate_pkt_xml_no_saveref_tags():
         """
     )
 
-    with pytest.raises(MissingSaveRefIdError):
+    with pytest.raises(MissingSaveRefIdError, match="SAVE_REF_ID"):
         validate_pkt_xml(root)
