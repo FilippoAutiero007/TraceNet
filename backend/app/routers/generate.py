@@ -21,7 +21,7 @@ from app.models.schemas import (
     SubnetRequest,
     DeviceConfig,
 )
-from app.services.nlp_parser import parse_network_request
+from app.services.nlp_parser import ParserServiceError, parse_network_request
 from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
@@ -56,14 +56,9 @@ async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
     try:
         return await parse_network_request(request.user_input, request.current_state)
-    except Exception as exc:
+    except ParserServiceError as exc:
         logger.error("Parse network request failed: %s", exc, exc_info=True)
-        return ParseNetworkResponse(
-            intent=ParseIntent.NOT_NETWORK, 
-            missing=[], 
-            json={}, 
-            error=f"Parser error: {str(exc)}"
-        )
+        raise HTTPException(status_code=502, detail=f"Parser internal error: {exc}") from exc
 
 
 @router.post("/generate", response_model=GenerateResponse)

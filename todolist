@@ -1,56 +1,69 @@
-# TraceNet Bug Triage
+# TraceNet Todo List
 
-Obiettivo di questo file: elencare bug e rischi concreti trovati nel codice senza risolverli qui.
-Le voci sono divise per area (`backend` / `frontend`) e per priorita.
+Stato: backlog tecnico aggiornato al codice attuale.
+Contiene solo bug o ottimizzazioni reali ancora aperte, divisi per area e priorita.
+Le voci gia risolte sono state rimosse.
 
 ## Backend
 
-### Critical
-
-- `save_pkt_file()` ritorna `success=True` senza validare strutturalmente l'XML generato.
-  Evidence:
-  - Il progetto ha un validator dedicato in [validator.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/pkt_generator/validator.py#L44).
-  - Il flusso di generazione in [entrypoint.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/pkt_generator/entrypoint.py#L497) genera il PKT, decripta l'XML e ritorna successo in [entrypoint.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/pkt_generator/entrypoint.py#L505) senza chiamare `validate_pkt_xml`.
-  Impact:
-  - Se un file manuale o un edge case produce XML corrotto ma decriptabile, l'API non isola il problema e risponde comunque come se il file fosse sano.
-
-- L'endpoint parser trasforma errori interni del parser in `not_network`, mascherando outage o bug veri.
-  Evidence:
-  - In [generate.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/routers/generate.py#L54) l'endpoint `/parse-network-request` intercetta qualunque eccezione.
-  - In [generate.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/routers/generate.py#L61) restituisce sempre `intent=NOT_NETWORK`.
-  Impact:
-  - Un errore LLM, validazione o parsing viene presentato al frontend come "richiesta non di rete", rendendo difficile capire dove sia il problema reale.
-
 ### High
 
-- Il retry del parser e troppo ampio e riprova anche errori deterministici.
+- Il retry del parser e troppo ampio e ritenta anche errori deterministici.
   Evidence:
-  - In [nlp_parser.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/nlp_parser.py#L161) il decoratore `@retry` usa anche `Exception`.
-  - Gli errori di JSON malformato vengono convertiti in `ValueError` in [nlp_parser.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/nlp_parser.py#L219).
-  - Gli errori finali vengono rilanciati come `ValueError` in [nlp_parser.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/nlp_parser.py#L235).
+  - In [nlp_parser.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/services/nlp_parser.py) il decoratore `@retry` usa anche `Exception`.
+  - Gli errori di risposta AI malformata vengono convertiti in `ParserServiceError`, ma il retry li intercetta comunque.
   Impact:
-  - Un errore non recuperabile viene comunque ritentato tre volte, rallentando le risposte e sporcando il segnale diagnostico.
+  - Errori non recuperabili vengono ritentati tre volte, rallentando la risposta e peggiorando la diagnosi.
 
-- Il subnet di default per reti molto piccole (`/31`, `/32`) produce una richiesta formalmente accettata ma non allocabile.
+- `_default_subnet_for_base()` gestisce male reti base troppo piccole come `/31` e `/32`.
   Evidence:
-  - `_default_subnet_for_base()` in [generate.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/routers/generate.py#L34) usa `max(1, num_addresses - 2)`.
-  - `calculate_vlsm()` in [subnet_calculator.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/subnet_calculator.py#L31) forza almeno 2 host bits e quindi almeno una `/30`.
+  - In [generate.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/routers/generate.py) usa `max(1, num_addresses - 2)`.
+  - In [subnet_calculator.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/services/subnet_calculator.py) la VLSM richiede comunque una subnet allocabile con almeno 4 indirizzi.
   Impact:
-  - Input con base network valida ma troppo piccola possono passare la validazione iniziale e fallire solo piu tardi in modo poco intuitivo.
+  - Input formalmente validi possono fallire piu tardi con errori meno chiari del necessario.
+
+- L'endpoint `/generate-pkt` costruisce `network_config_dict` con chiavi duplicate e summary non del tutto coerente.
+  Evidence:
+  - In [generate.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/routers/generate.py) `server_services` e definito due volte nello stesso dict.
+  - Nello stesso endpoint `config_summary.routing_protocol` usa `request.routing_protocol`, mentre la pipeline interna usa `protocol_value` normalizzato.
+  Impact:
+  - Il comportamento oggi non si rompe, ma il codice e piu fragile e puo generare output diagnostico incoerente rispetto alla logica reale.
+
+- Il flusso manuale non espone le stesse opzioni del flusso automatico.
+  Evidence:
+  - [ManualNetworkRequest](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/models/manual_schemas.py) non include `nat`.
+  - Il flusso automatico invece passa `nat` a [generate.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/routers/generate.py).
+  Impact:
+  - Le due API che dovrebbero generare PKT equivalenti hanno capacita diverse e possono divergere nei casi reali.
 
 ### Medium
 
-- Non c'e ancora una copertura API-level dedicata al caso "artefatto generato ma XML invalido".
+- La diagnostica del parser dipende ancora da un filtro keyword molto semplice.
   Evidence:
-  - La suite testa il validator separatamente e testa la generazione, ma il ramo API/`save_pkt_file()` non fallisce ancora sul validator.
+  - `_is_network_related()` in [nlp_parser.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/services/nlp_parser.py) usa solo `any(keyword in lowered ...)`.
   Impact:
-  - In futuro, quando arriveranno payload manuali borderline, i test potrebbero non dire subito che il problema e nel validatore finale mancante nel flusso.
+  - Richieste tecniche borderline possono essere classificate male prima ancora di arrivare al parser vero.
 
-- La diagnostica del parser dipende da un filtro keyword molto semplice e puo classificare male richieste tecniche borderline.
+- Alcuni test di integrazione restano skip-friendly invece di essere un gate duro.
   Evidence:
-  - `_is_network_related()` in [nlp_parser.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/services/nlp_parser.py#L156) usa solo `any(keyword in lowered ...)`.
+  - [test_pkt_generator_integration.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/tests/test_pkt_generator_integration.py) e [test_layout.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/tests/test_layout.py) saltano se mancano template `.pkt`.
+  - [test_pkt_link_metadata.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/tests/test_pkt_link_metadata.py) salta se mancano fixture Packet Tracer di riferimento.
   Impact:
-  - Richieste reali ma formulate in modo non standard possono saltare direttamente a `NOT_NETWORK`, oppure richieste non di rete con sottostringhe casuali possono entrare nel parser.
+  - In ambienti incompleti la suite puo risultare verde senza coprire davvero i percorsi di integrazione piu importanti.
+
+- C'e ancora almeno un test placeholder che non verifica nulla.
+  Evidence:
+  - [test_pkt_catalog.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/tests/test_pkt_catalog.py) contiene `test_template_path_resolution()` con solo `pass`.
+  Impact:
+  - La suite dichiara copertura su quel punto, ma in realta non controlla niente.
+
+### Low
+
+- `main.py` continua a usare l'hook FastAPI `@app.on_event("startup")`, gia deprecato.
+  Evidence:
+  - [main.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/app/main.py) emette warning durante i test.
+  Impact:
+  - Non e un bug funzionale oggi, ma lascia warning costanti e rende piu rumorosa la suite.
 
 ## Frontend
 
@@ -58,42 +71,41 @@ Le voci sono divise per area (`backend` / `frontend`) e per priorita.
 
 - `Hero` usa `Math.random()` durante il render.
   Evidence:
-  - In [Hero.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/sections/Hero.tsx#L31) le coordinate e i timing delle particelle sono generati in render.
+  - In [Hero.tsx](/mnt/c/users/pippo/onedrive/desktop/tracenet/frontend/src/sections/Hero.tsx) particelle, size, opacity e animation delay vengono generati in render.
   Impact:
-  - Render non idempotente, UI instabile e lint gia rosso; in Strict Mode i valori possono cambiare tra render consecutivi.
+  - Il render non e puro, l'UI e instabile e in Strict Mode i valori possono cambiare tra render consecutivi.
 
-- `SidebarMenuSkeleton` usa `Math.random()` in render e rompe purezza React.
+- `SidebarMenuSkeleton` usa comunque `Math.random()` per calcolare la width.
   Evidence:
-  - In [sidebar.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/components/ui/sidebar.tsx#L609) la width viene calcolata con `Math.random()`.
+  - In [sidebar.tsx](/mnt/c/users/pippo/onedrive/desktop/tracenet/frontend/src/components/ui/sidebar.tsx) la width nasce da `Math.random()` dentro `useMemo`.
   Impact:
-  - Anche qui il componente non e realmente puro; il lint lo segnala gia come errore concreto.
+  - Il componente continua a non essere deterministicamente riproducibile tra mount diversi.
 
 - Router frontend e configurazione Vite sono incoerenti per deploy statici o subpath.
   Evidence:
-  - [vite.config.ts](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/vite.config.ts#L6) imposta `base: './'`.
-  - [App.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/App.tsx#L13) usa `BrowserRouter`.
+  - [vite.config.ts](/mnt/c/users/pippo/onedrive/desktop/tracenet/frontend/vite.config.ts) usa `base: './'`.
+  - [App.tsx](/mnt/c/users/pippo/onedrive/desktop/tracenet/frontend/src/App.tsx) usa `BrowserRouter`.
   Impact:
-  - Su deploy statici o refresh diretto di `/generator` il routing puo rompersi per mancanza di rewrite coerenti con una base relativa.
+  - Su refresh diretto o deploy statici senza rewrite coerenti il routing puo rompersi.
 
-- `ClerkProvider` viene montato anche se la publishable key e assente.
+- `ClerkProvider` viene montato anche quando la publishable key non e presente.
   Evidence:
-  - [main.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/main.tsx#L7) legge `VITE_CLERK_PUBLISHABLE_KEY`.
-  - [main.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/main.tsx#L11) passa il valore a `ClerkProvider` senza guardia.
+  - [main.tsx](/mnt/c/users/pippo/onedrive/desktop/tracenet/frontend/src/main.tsx) passa `VITE_CLERK_PUBLISHABLE_KEY` direttamente a `ClerkProvider`.
   Impact:
-  - In ambienti mal configurati il bootstrap puo fallire o avere comportamento incoerente prima ancora che l'app mostri un errore utile.
+  - In ambienti mal configurati il bootstrap puo fallire prima di mostrare un errore utile.
 
 ### Medium
 
-- Il pulsante "Guarda la Demo" e un controllo morto.
+- Il pulsante "Guarda la Demo" resta un controllo morto.
   Evidence:
-  - In [Hero.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/sections/Hero.tsx#L77) il bottone non ha `onClick`, `href` o navigazione.
+  - In [Hero.tsx](/mnt/c/users/pippo/onedrive/desktop/tracenet/frontend/src/sections/Hero.tsx) il bottone non ha navigazione o azione.
   Impact:
-  - UX fuorviante: sembra un'azione disponibile ma non esegue nulla.
+  - L'interfaccia promette un'azione che non esiste.
 
 ### Low
 
-- La suite frontend non e ancora una rete di sicurezza affidabile per questi problemi, perche i bug di purezza React sono gia noti ma restano nel codice.
+- La suite frontend non e ancora una rete di sicurezza solida per questi problemi di purezza e bootstrap.
   Evidence:
-  - I casi `Hero` e `SidebarMenuSkeleton` sono gia abbastanza concreti da essere trasformati in gate statici/CI.
+  - I problemi su `Hero`, `SidebarMenuSkeleton`, router e `ClerkProvider` non sono coperti da test automatici dedicati.
   Impact:
-  - Se in futuro arrivano modifiche manuali problematiche nel frontend, il progetto non ha ancora una barriera di qualita abbastanza forte da localizzare subito il problema.
+  - Future modifiche manuali al frontend possono introdurre regressioni senza localizzazione rapida del problema.

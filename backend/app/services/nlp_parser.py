@@ -14,6 +14,10 @@ from app.models.schemas import ParseIntent, ParseNetworkResponse
 
 logger = logging.getLogger(__name__)
 
+
+class ParserServiceError(RuntimeError):
+    """Raised when the parser backend fails for infrastructure or internal reasons."""
+
 RAG_KNOWLEDGE_BASE = {
     "schema": {
         "base_network": "string CIDR",
@@ -218,7 +222,7 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
             validated_data = MistralResponseSchema.model_validate(data_dict)
         except (json.JSONDecodeError, ValidationError) as exc:
             logger.error("Invalid response format from Mistral: %s. Content: %s", exc, raw_content)
-            raise ValueError(f"AI returned invalid or malformed JSON: {exc}")
+            raise ParserServiceError(f"AI returned invalid or malformed JSON: {exc}") from exc
 
         parsed_json = validated_data.json_payload
         merged = _merge_with_state(parsed_json, current_state)
@@ -234,6 +238,6 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
 
     except Exception as exc:
         logger.error("Parser failure: %s", exc, exc_info=True)
-        if isinstance(exc, ValueError):
-            raise exc
-        raise ValueError(f"Failed to parse network request: {str(exc)}")
+        if isinstance(exc, ParserServiceError):
+            raise
+        raise ParserServiceError(f"Failed to parse network request: {str(exc)}") from exc

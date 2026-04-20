@@ -47,7 +47,7 @@ class DeviceConfig(BaseModel):
     """Device configuration"""
     routers: int = Field(default=1, ge=1, le=5)
     switches: int = Field(default=1, ge=0, le=10)
-    pcs: int = Field(default=1, ge=1, le=100)
+    pcs: int = Field(default=1, ge=1)
     servers: int = Field(default=0, ge=0)  
 
 
@@ -288,12 +288,6 @@ class NormalizedNetworkRequest(BaseModel):
                     srv.services = _normalize_service_list(srv.services)
                 srv.hostname = str(srv.hostname or "").strip()
 
-        if self.subnets:
-            total_subnet_hosts = sum(subnet.required_hosts for subnet in self.subnets)
-            if total_subnet_hosts < self.pcs:
-                raise ValueError(
-                    "Total subnet required_hosts must be >= pcs for coherent host allocation"
-                )
         return self
 
 

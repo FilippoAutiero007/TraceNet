@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from .template import get_pkt_generator, get_template_path
 from .topology import build_links_config
 from .utils import safe_name
 from .config_generator import calculate_static_routes
+from .validator import validate_pkt_xml
 from .network_plan import (
     alloc_ip,
     apply_switch_port_roles,
@@ -499,6 +501,8 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         # Export XML of the GENERATED PKT (not the template)
         pkt_bytes = Path(pkt_path).read_bytes()
         generated_xml = decrypt_pkt_data(pkt_bytes).decode("utf-8", errors="strict")
+        xml_root = ET.fromstring(generated_xml)
+        validate_pkt_xml(xml_root)
         Path(xml_path).write_text(generated_xml, encoding="utf-8")
 
         file_size = Path(pkt_path).stat().st_size

@@ -2,6 +2,7 @@ import os
 import shutil
 import pytest
 from app.services.pkt_generator import save_pkt_file
+from app.services.pkt_generator import entrypoint as pkt_entrypoint
 from app.services.pkt_generator.utils import validate_name
 
 # Helper for mocking subnets
@@ -82,10 +83,49 @@ def test_save_pkt_file_no_devices(output_dir):
         result = save_pkt_file([], config, output_dir)
     except FileNotFoundError:
         pytest.skip("Template not found")
-        
-    # Should generate empty network (or near empty)
-    with open(result["xml_path"], "r") as f:
-        content = f.read()
-        import re
-        assert re.search(r"<DEVICES\s*/>", content) or re.search(r"<DEVICES>\s*</DEVICES>", content)
 
+    assert result["success"] is False
+    assert "save_ref_id" in result["error"].lower() or "saverefid" in result["error"].lower()
+
+
+def test_save_pkt_file_reports_invalid_generated_xml(output_dir, monkeypatch):
+    subnets = [MockSubnet(["192.168.1.1", "192.168.1.2"], "255.255.255.0")]
+    config = {"devices": {"routers": 1, "switches": 1, "pcs": 1}}
+
+    monkeypatch.setattr(
+        pkt_entrypoint,
+        "decrypt_pkt_data",
+        lambda _: b"<PACKETTRACER5><NETWORK>",
+    )
+
+    result = save_pkt_file(subnets, config, output_dir)
+
+    assert result["success"] is False
+    assert "no element found" in result["error"].lower()
+
+
+def test_save_pkt_file_reports_structural_xml_validation_errors(output_dir, monkeypatch):
+    subnets = [MockSubnet(["192.168.1.1", "192.168.1.2"], "255.255.255.0")]
+    config = {"devices": {"routers": 1, "switches": 1, "pcs": 1}}
+
+    invalid_but_wellformed_xml = b"""
+    <PACKETTRACER5>
+      <NETWORK>
+        <DEVICES></DEVICES>
+        <LINKS>
+          <LINK>
+            <CABLE>
+              <FROM>save-ref-id:111</FROM>
+              <TO>save-ref-id:222</TO>
+            </CABLE>
+          </LINK>
+        </LINKS>
+      </NETWORK>
+    </PACKETTRACER5>
+    """
+    monkeypatch.setattr(pkt_entrypoint, "decrypt_pkt_data", lambda _: invalid_but_wellformed_xml)
+
+    result = save_pkt_file(subnets, config, output_dir)
+
+    assert result["success"] is False
+    assert "save_ref_id" in result["error"].lower() or "saverefid" in result["error"].lower()
