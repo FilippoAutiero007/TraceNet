@@ -1,13 +1,38 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Play, Activity, Shield, Zap } from 'lucide-react';
 import { SignUpButton } from '@clerk/clerk-react';
 
 export function Hero() {
   const [isHovered, setIsHovered] = useState(false);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const heroRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (heroRef.current) {
+        const rect = heroRef.current.getBoundingClientRect();
+        setMousePosition({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      }
+    };
+
+    const heroElement = heroRef.current;
+    if (heroElement) {
+      heroElement.addEventListener('mousemove', handleMouseMove);
+    }
+
+    return () => {
+      if (heroElement) {
+        heroElement.removeEventListener('mousemove', handleMouseMove);
+      }
+    };
+  }, []);
 
   return (
-    <section className="relative min-h-screen flex items-center justify-center bg-slate-950 overflow-hidden pt-16">
+    <section ref={heroRef} className="relative min-h-screen flex items-center justify-center bg-black overflow-hidden pt-16">
       {/* Background Grid Animation */}
       <div className="absolute inset-0 opacity-20">
         <div
@@ -24,19 +49,39 @@ export function Hero() {
 
       {/* Animated Particles */}
       <div className="absolute inset-0 overflow-hidden">
-        {[...Array(20)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-2 h-2 bg-cyan-400/30 rounded-full animate-pulse"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 2}s`,
-              animationDuration: `${2 + Math.random() * 2}s`,
-            }}
-          />
-        ))}
+        {[...Array(30)].map((_, i) => {
+          const baseX = Math.random() * 100;
+          const baseY = Math.random() * 100;
+          const size = Math.random() * 3 + 1;
+          const duration = Math.random() * 4 + 2;
+          
+          return (
+            <div
+              key={i}
+              className="absolute rounded-full transition-all duration-1000 ease-out"
+              style={{
+                width: `${size}px`,
+                height: `${size}px`,
+                left: `${baseX}%`,
+                top: `${baseY}%`,
+                background: `radial-gradient(circle, rgba(6, 182, 212, ${0.3 + Math.random() * 0.4}) 0%, transparent 70%)`,
+                filter: 'blur(1px)',
+                transform: `translate(${(mousePosition.x - baseX) * 0.02}px, ${(mousePosition.y - baseY) * 0.02}px)`,
+                transition: 'transform 0.3s ease-out',
+                animation: `float ${duration}s ease-in-out infinite`,
+                animationDelay: `${Math.random() * 2}s`,
+              }}
+            />
+          );
+        })}
       </div>
+
+      <style jsx>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px) scale(1); opacity: 0.3; }
+          50% { transform: translateY(-20px) scale(1.1); opacity: 0.8; }
+        }
+      `}</style>
 
       {/* Gradient Orbs */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl" />
@@ -51,7 +96,11 @@ export function Hero() {
           </div>
 
           {/* Main Heading */}
-          <h1 className="text-7xl sm:text-8xl md:text-9xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-8 tracking-tighter filter drop-shadow-[0_0_30px_rgba(6,182,212,0.5)] animate-in fade-in zoom-in duration-1000">
+          <h1 className="text-7xl sm:text-8xl md:text-9xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-8 tracking-tighter animate-in fade-in zoom-in duration-1000 hover:scale-105 transition-transform duration-300"
+              style={{
+                filter: 'drop-shadow(0 0 30px rgba(6,182,212,0.5))',
+                textShadow: '0 0 60px rgba(6,182,212,0.3)'
+              }}>
             NET TRACE
           </h1>
 

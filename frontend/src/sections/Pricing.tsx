@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X, Sparkles, Building2, GraduationCap } from 'lucide-react';
+import { Check, X, Sparkles, GraduationCap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { SignUpButton } from '@clerk/clerk-react';
@@ -16,6 +16,8 @@ const plans = [
       { text: '5 progetti salvati', included: true },
       { text: 'Topologie base', included: true },
       { text: 'Supporto community', included: true },
+      { text: 'Generazione file .pkt limitata (10 al mese)', included: true },
+      { text: 'Pubblicità dopo ogni generazione', included: true },
       { text: 'Esportazione JSON', included: false },
       { text: 'Analisi avanzata', included: false },
       { text: 'API access', included: false },
@@ -24,29 +26,10 @@ const plans = [
     popular: false,
   },
   {
-    id: 'student',
-    name: 'Student',
-    description: 'Per studenti verificati',
-    price: { monthly: 4.99, yearly: 49.99 },
-    icon: GraduationCap,
-    features: [
-      { text: '20 nodi per simulazione', included: true },
-      { text: '50 progetti salvati', included: true },
-      { text: 'Tutte le topologie', included: true },
-      { text: 'Supporto email', included: true },
-      { text: 'Esportazione JSON', included: true },
-      { text: 'Analisi avanzata', included: false },
-      { text: 'API access', included: false },
-    ],
-    cta: 'Scegli Student',
-    popular: false,
-    badge: 'Richiede .edu',
-  },
-  {
     id: 'professional',
     name: 'Professional',
     description: 'Per professionisti e team',
-    price: { monthly: 14.99, yearly: 149.99 },
+    price: { monthly: 4.99, yearly: 30 },
     icon: Sparkles,
     features: [
       { text: 'Nodi illimitati', included: true },
@@ -56,27 +39,13 @@ const plans = [
       { text: 'Esportazione PCAP, JSON, CSV', included: true },
       { text: 'Analisi avanzata AI', included: true },
       { text: 'API access completo', included: true },
+      { text: 'Generazione infinita file .pkt', included: true },
+      { text: '0 pubblicità', included: true },
+      { text: 'Controllo inverso (carica file .pkt per trovare errori)', included: true, comingSoon: true },
+      { text: 'Modello Mistral AI', included: true },
     ],
     cta: 'Scegli Professional',
     popular: true,
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    description: 'Per aziende e istituzioni',
-    price: { monthly: 199, yearly: 1990 },
-    icon: Building2,
-    features: [
-      { text: 'Nodi personalizzati', included: true },
-      { text: 'SSO Integration', included: true },
-      { text: 'Supporto dedicato', included: true },
-      { text: 'On-premise option', included: true },
-      { text: 'API quota illimitata', included: true },
-      { text: 'SLA garantito', included: true },
-      { text: 'Training incluso', included: true },
-    ],
-    cta: 'Contattaci',
-    popular: false,
   },
 ];
 
@@ -117,7 +86,7 @@ export function Pricing() {
         </div>
 
         {/* Pricing Cards */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
           {plans.map((plan) => (
             <div
               key={plan.id}
@@ -135,14 +104,7 @@ export function Pricing() {
                 </div>
               )}
 
-              {plan.badge && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-purple-500 text-white text-xs font-semibold px-3 py-1 rounded-full">
-                    {plan.badge}
-                  </span>
-                </div>
-              )}
-
+              
               <div className="mb-6">
                 <plan.icon className={`w-10 h-10 mb-4 ${
                   plan.popular ? 'text-cyan-400' : 'text-slate-400'
@@ -174,6 +136,9 @@ export function Pricing() {
                       feature.included ? 'text-slate-300' : 'text-slate-600'
                     }`}>
                       {feature.text}
+                      {feature.comingSoon && (
+                        <span className="text-xs text-cyan-400 ml-2">(Presto in arrivo)</span>
+                      )}
                     </span>
                   </li>
                 ))}

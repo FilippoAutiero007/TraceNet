@@ -1,5 +1,7 @@
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
+from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator.generator_components.device_build import _configure_server_services
 
 
@@ -156,3 +158,69 @@ def test_enabled_services_rewrite_fresh_data_without_legacy_residue():
     assert smtp.findtext("DOMAIN") == "lab.local"
     assert pop3.findtext("DOMAIN") == "lab.local"
     assert smtp.find("USER_ACCOUNT_MNGR/ACCOUNT/USERNAME").text == "bob"
+
+
+class MockSubnet:
+    def __init__(self, name: str, mask: str, usable_range: list[str], gateway: str):
+        self.name = name
+        self.mask = mask
+        self.usable_range = usable_range
+        self.gateway = gateway
+
+
+def _find_device(root: ET.Element, name: str) -> ET.Element | None:
+    for dev in root.findall(".//NETWORK/DEVICES/DEVICE"):
+        if (dev.findtext("ENGINE/NAME") or "").strip() == name:
+            return dev
+    return None
+
+
+def _service_enabled(node: ET.Element | None, path: str) -> str:
+    if node is None:
+        return ""
+    return (node.findtext(path) or "").strip()
+
+
+def test_generated_server_service_flags_match_enabled_and_disabled_services(tmp_path, monkeypatch):
+    template_path = Path(__file__).resolve().parent.parent / "templates" / "simple_ref.pkt"
+    monkeypatch.setenv("PKT_TEMPLATE_PATH", str(template_path))
+
+    subnets = [
+        MockSubnet("LAN_A", "255.255.255.0", ["192.168.10.2", "192.168.10.126"], gateway="192.168.10.1"),
+        MockSubnet("LAN_B", "255.255.255.0", ["192.168.20.2", "192.168.20.126"], gateway="192.168.20.1"),
+    ]
+    config = {
+        "devices": {"routers": 1, "switches": 2, "pcs": 0, "servers": 2},
+        "routing_protocol": "static",
+        "servers_config": [
+            {
+                "services": ["dns", "dhcp", "ftp", "http", "https"],
+                "dns_records": [{"hostname": "core.local", "ip": "192.168.10.2"}],
+                "ftp_users": [{"username": "alice", "password": "pw"}],
+            },
+            {
+                "services": [],
+            },
+        ],
+    }
+
+    result = save_pkt_file(subnets, config, str(tmp_path))
+    assert result["success"] is True
+
+    root = ET.fromstring(Path(result["xml_path"]).read_text(encoding="utf-8", errors="strict"))
+    server0 = _find_device(root, "Server0")
+    server1 = _find_device(root, "Server1")
+    assert server0 is not None
+    assert server1 is not None
+
+    assert _service_enabled(server0, "ENGINE/DNS_SERVER/ENABLED") == "1"
+    assert _service_enabled(server0, "ENGINE/DHCP_SERVERS/ASSOCIATED_PORTS/ASSOCIATED_PORT/DHCP_SERVER/ENABLED") == "1"
+    assert _service_enabled(server0, "ENGINE/FTP_SERVER/ENABLED") == "1"
+    assert _service_enabled(server0, "ENGINE/HTTP_SERVER/ENABLED") == "1"
+    assert _service_enabled(server0, "ENGINE/HTTPS_SERVER/HTTPSENABLED") == "1"
+
+    assert _service_enabled(server1, "ENGINE/DNS_SERVER/ENABLED") == "0"
+    assert _service_enabled(server1, "ENGINE/DHCP_SERVERS/ASSOCIATED_PORTS/ASSOCIATED_PORT/DHCP_SERVER/ENABLED") == "0"
+    assert _service_enabled(server1, "ENGINE/FTP_SERVER/ENABLED") == "0"
+    assert _service_enabled(server1, "ENGINE/HTTP_SERVER/ENABLED") == "0"
+    assert _service_enabled(server1, "ENGINE/HTTPS_SERVER/HTTPSENABLED") == "0"

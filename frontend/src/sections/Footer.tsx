@@ -1,132 +1,79 @@
-import { Network, Github, Twitter, Linkedin, Mail } from 'lucide-react';
+import React from 'react';
+import { Mail, Github, Instagram, Network } from 'lucide-react';
+import { motion } from 'framer-motion';
 
-const footerLinks = {
-  product: [
-    { label: 'Funzionalità', href: '#features' },
-    { label: 'Prezzi', href: '#pricing' },
-    { label: 'Dashboard', href: '#dashboard' },
-    { label: 'API Docs', href: '#' },
-  ],
-  company: [
-    { label: 'Chi Siamo', href: '#' },
-    { label: 'Blog', href: '#' },
-    { label: 'Carriere', href: '#' },
-    { label: 'Contatti', href: '#' },
-  ],
-  resources: [
-    { label: 'Documentazione', href: '#' },
-    { label: 'Tutorial', href: '#' },
-    { label: 'Community', href: '#' },
-    { label: 'Supporto', href: '#' },
-  ],
-  legal: [
-    { label: 'Privacy Policy', href: '#' },
-    { label: 'Terms of Service', href: '#' },
-    { label: 'Cookie Policy', href: '#' },
-  ],
-};
+export const Footer: React.FC = () => {
+  const socialLinks = [
+    {
+      name: 'Email',
+      icon: <Mail size={28} />,
+      href: 'https://mail.google.com/mail/?view=cm&fs=1&to=filippoautiero07@gmail.com',
+      color: 'group-hover:text-red-500',
+      borderColor: 'group-hover:border-red-500/30',
+      label: 'Invia una email a Filippo'
+    },
+    {
+      name: 'GitHub',
+      icon: <Github size={28} />,
+      href: 'https://github.com/FilippoAutiero007',
+      color: 'group-hover:text-[#181717]',
+      borderColor: 'group-hover:border-[#181717]/30',
+      label: 'Profilo GitHub di Filippo'
+    },
+    {
+      name: 'Instagram',
+      icon: <Instagram size={28} />,
+      href: 'https://www.instagram.com/filippo_autiero_/',
+      color: 'group-hover:text-[#E4405F]',
+      borderColor: 'group-hover:border-[#E4405F]/30',
+      label: 'Profilo Instagram di Filippo'
+    }
+  ];
 
-export function Footer() {
   return (
-    <footer className="bg-slate-950 border-t border-slate-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
-          {/* Brand */}
-          <div className="col-span-2">
-            <div className="flex items-center gap-2 mb-4">
-              <Network className="w-8 h-8 text-cyan-400" />
-              <span className="text-xl font-bold text-white">NetTrace</span>
-            </div>
-            <p className="text-slate-400 text-sm mb-6 max-w-xs">
-              Strumento automatizzato per la tracciatura e l'analisi dei pacchetti di rete. 
-              Simula, traccia e analizza reti complesse.
-            </p>
-            <div className="flex items-center gap-4">
-              <a href="#" className="text-slate-400 hover:text-cyan-400 transition-colors">
-                <Github className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-slate-400 hover:text-cyan-400 transition-colors">
-                <Twitter className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-slate-400 hover:text-cyan-400 transition-colors">
-                <Linkedin className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-slate-400 hover:text-cyan-400 transition-colors">
-                <Mail className="w-5 h-5" />
-              </a>
-            </div>
+    <footer id="contact" className="bg-slate-950 border-t border-slate-800 py-20">
+      <div className="max-w-6xl mx-auto px-6">
+        <div className="flex flex-col items-center justify-center gap-12">
+          {/* NetTrace Brand */}
+          <div className="flex items-center gap-3 mb-4">
+            <Network className="w-10 h-10 text-cyan-400" />
+            <span className="text-3xl font-bold text-white">NetTrace</span>
           </div>
 
-          {/* Product */}
-          <div>
-            <h4 className="text-white font-semibold mb-4">Prodotto</h4>
-            <ul className="space-y-2">
-              {footerLinks.product.map((link) => (
-                <li key={link.label}>
-                  <a
-                    href={link.href}
-                    className="text-slate-400 hover:text-cyan-400 transition-colors text-sm"
-                  >
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <h2 className="text-4xl font-bold text-white tracking-tight">Contatti</h2>
 
-          {/* Company */}
-          <div>
-            <h4 className="text-white font-semibold mb-4">Azienda</h4>
-            <ul className="space-y-2">
-              {footerLinks.company.map((link) => (
-                <li key={link.label}>
-                  <a
-                    href={link.href}
-                    className="text-slate-400 hover:text-cyan-400 transition-colors text-sm"
-                  >
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Resources */}
-          <div>
-            <h4 className="text-white font-semibold mb-4">Risorse</h4>
-            <ul className="space-y-2">
-              {footerLinks.resources.map((link) => (
-                <li key={link.label}>
-                  <a
-                    href={link.href}
-                    className="text-slate-400 hover:text-cyan-400 transition-colors text-sm"
-                  >
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        {/* Bottom Bar */}
-        <div className="mt-12 pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-slate-500 text-sm">
-            © 2026 NetTrace. Tutti i diritti riservati.
-          </p>
-          <div className="flex items-center gap-6">
-            {footerLinks.legal.map((link) => (
-              <a
-                key={link.label}
+          <div className="flex items-center justify-center gap-10 md:gap-16">
+            {socialLinks.map((link) => (
+              <motion.a
+                key={link.name}
                 href={link.href}
-                className="text-slate-500 hover:text-cyan-400 transition-colors text-sm"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col items-center gap-4 group"
+                aria-label={link.label}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                transition={{ type: "spring", stiffness: 400, damping: 17 }}
               >
-                {link.label}
-              </a>
+                <div className={`w-16 h-16 bg-slate-900 rounded-3xl shadow-sm flex items-center justify-center border border-slate-700 ${link.borderColor} group-hover:shadow-lg group-hover:shadow-cyan-500/20 transition-all duration-300`}>
+                  <div className={`text-slate-400 ${link.color} transition-colors`}>
+                    {link.icon}
+                  </div>
+                </div>
+                <span className="text-sm font-semibold text-slate-400 group-hover:text-white transition-colors">
+                  {link.name}
+                </span>
+              </motion.a>
             ))}
+          </div>
+
+          <div className="mt-8 text-center">
+            <p className="text-xs text-slate-500">
+              © {new Date().getFullYear()} Filippo Autiero. All rights reserved.
+            </p>
           </div>
         </div>
       </div>
     </footer>
   );
-}
+};

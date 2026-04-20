@@ -131,6 +131,74 @@ def test_generate_router_config_formats_standard_and_extended_acls():
     assert " ip access-group WEB_ONLY in" in joined
 
 
+def test_generate_router_config_supports_acl_remarks_and_port_ranges():
+    dev_cfg = {
+        "name": "Router0",
+        "interfaces": [
+            {
+                "name": "FastEthernet0/0",
+                "ip": "192.168.10.1",
+                "mask": "255.255.255.0",
+                "role": "lan",
+                "acl": {"name": "APP_FILTER", "direction": "out"},
+            }
+        ],
+        "acl": [
+            {
+                "type": "standard",
+                "id": "15",
+                "rules": [
+                    {"remark": "ALLOW_ADMIN"},
+                    {"action": "permit", "src_host": "192.168.10.10"},
+                ],
+            },
+            {
+                "type": "extended",
+                "name": "APP_FILTER",
+                "rules": [
+                    {"remark": "ALLOW_APP_RANGE"},
+                    {
+                        "action": "permit",
+                        "protocol": "tcp",
+                        "src_any": True,
+                        "dst_network": "10.0.0.0",
+                        "dst_mask": "255.255.255.0",
+                        "dst_port_op": "range",
+                        "dst_port": "1000 2000",
+                    },
+                ],
+            },
+        ],
+    }
+
+    lines = generate_router_config(dev_cfg, all_devices=[dev_cfg], links_config=[])
+    joined = "\n".join(lines)
+
+    assert "access-list 15 remark ALLOW_ADMIN" in joined
+    assert "access-list 15 permit host 192.168.10.10" in joined
+    assert " remark ALLOW_APP_RANGE" in joined
+    assert " permit tcp any 10.0.0.0 0.0.0.255 range 1000 2000" in joined
+    assert " ip access-group APP_FILTER out" in joined
+
+
+def test_generate_switch_config_uses_vlan_definitions_for_trunk_fallback():
+    lines = generate_switch_config(
+        {
+            "name": "Switch0",
+            "vlans": [
+                {"id": 10, "name": "ADMIN"},
+                {"id": 30, "name": "VOICE", "native": True},
+            ],
+            "trunk_ports": ["FastEthernet0/1"],
+        }
+    )
+    joined = "\n".join(lines)
+
+    assert " switchport mode trunk" in joined
+    assert " switchport trunk native vlan 30" in joined
+    assert " switchport trunk allowed vlan 10,30" in joined
+
+
 def test_manual_network_request_preserves_vlan_and_acl_fields():
     request = ManualNetworkRequest(
         base_network="192.168.0.0/24",
@@ -208,3 +276,54 @@ def test_save_pkt_file_generates_vlan_trunk_and_acl_configs(tmp_path, monkeypatc
     assert "switchport trunk allowed vlan 10,20" in switch_joined
     assert "switchport access vlan 10" in switch_joined
     assert "switchport access vlan 20" in switch_joined
+
+
+def test_save_pkt_file_applies_acl_to_explicit_interface_and_keeps_vlan_trunks(tmp_path, monkeypatch):
+    template_path = Path(__file__).resolve().parent.parent / "templates" / "simple_ref.pkt"
+    monkeypatch.setenv("PKT_TEMPLATE_PATH", str(template_path))
+
+    subnets = [
+        MockSubnet("Office", "255.255.255.0", ["192.168.30.2", "192.168.30.126"], gateway="192.168.30.1"),
+        MockSubnet("Servers", "255.255.255.0", ["192.168.40.2", "192.168.40.126"], gateway="192.168.40.1"),
+    ]
+    config = {
+        "devices": {"routers": 1, "switches": 1, "pcs": 2, "servers": 0},
+        "routing_protocol": "static",
+        "vlans": [
+            {"id": 30, "name": "OFFICE"},
+            {"id": 40, "name": "SERVERS", "native": True},
+        ],
+        "acl": [
+            {
+                "type": "extended",
+                "name": "LIMIT_OFFICE",
+                "apply_to_interface": "FastEthernet0/0.30",
+                "direction": "out",
+                "rules": [
+                    {"action": "permit", "protocol": "ip", "src_any": True, "dst_any": True},
+                ],
+            }
+        ],
+        "pcs_config": [
+            {"vlan_id": 30},
+            {"vlan_id": 40},
+        ],
+    }
+
+    result = save_pkt_file(subnets, config, str(tmp_path))
+    assert result["success"] is True
+
+    root = ET.fromstring(Path(result["xml_path"]).read_text(encoding="utf-8", errors="strict"))
+    router0 = _find_device(root, "Router0")
+    switch0 = _find_device(root, "Switch0")
+    assert router0 is not None
+    assert switch0 is not None
+
+    router_joined = "\n".join(_running_lines(router0))
+    switch_joined = "\n".join(_running_lines(switch0))
+
+    assert "interface FastEthernet0/0.30" in router_joined
+    assert "ip access-group LIMIT_OFFICE out" in router_joined
+    assert "interface FastEthernet0/0.40" in router_joined
+    assert "switchport trunk native vlan 40" in switch_joined
+    assert "switchport trunk allowed vlan 30,40" in switch_joined

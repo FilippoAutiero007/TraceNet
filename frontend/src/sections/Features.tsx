@@ -7,7 +7,6 @@ import {
   Code2,
   Terminal
 } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const features = [
   {
@@ -60,54 +59,6 @@ const features = [
   },
 ];
 
-const codeExamples = {
-  python: `from nettrace import NetworkSimulation
-
-# Crea una rete con topologia mesh
-net = NetworkSimulation(topology='mesh')
-
-# Aggiungi nodi
-net.add_node('router1', type='router')
-net.add_node('pc1', type='endpoint')
-net.add_node('pc2', type='endpoint')
-
-# Configura link
-net.add_link('pc1', 'router1', delay=10, bandwidth=1000)
-net.add_link('pc2', 'router1', delay=10, bandwidth=1000)
-
-# Invia pacchetto
-packet = Packet(src='pc1', dst='pc2', payload='Hello!')
-net.send_packet(packet)
-
-# Avvia simulazione
-net.run(duration=60)`,
-  javascript: `import { NetworkSimulation } from '@nettrace/sdk';
-
-const net = new NetworkSimulation({ topology: 'star' });
-
-// Aggiungi nodi
-net.addNode('server', { type: 'server' });
-net.addNode('client1', { type: 'client' });
-net.addNode('client2', { type: 'client' });
-
-// Configura link
-net.addLink('client1', 'server', { 
-  delay: 5, 
-  bandwidth: 1000 
-});
-
-// Invia pacchetto
-net.sendPacket({
-  from: 'client1',
-  to: 'server',
-  data: 'Request'
-});
-
-// Ascolta eventi
-net.on('packet:received', (data) => {
-  console.log('Pacchetto ricevuto:', data);
-});`,
-};
 
 export function Features() {
   const [activeFeature, setActiveFeature] = useState('simulation');
@@ -180,44 +131,6 @@ export function Features() {
           </div>
         </div>
 
-        {/* Code Examples */}
-        <div className="mt-24">
-          <div className="text-center mb-12">
-            <h3 className="text-2xl sm:text-3xl font-bold text-white mb-4">
-              Integrazione Semplice
-            </h3>
-            <p className="text-slate-400">
-              Usa NetTrace nelle tue applicazioni con le nostre SDK
-            </p>
-          </div>
-
-          <Tabs defaultValue="python" className="max-w-3xl mx-auto">
-            <TabsList className="grid w-full grid-cols-2 bg-slate-900">
-              <TabsTrigger value="python" className="flex items-center gap-2">
-                <Code2 className="w-4 h-4" />
-                Python
-              </TabsTrigger>
-              <TabsTrigger value="javascript" className="flex items-center gap-2">
-                <Terminal className="w-4 h-4" />
-                JavaScript
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="python">
-              <div className="bg-slate-900 rounded-lg p-6 overflow-x-auto">
-                <pre className="text-sm text-slate-300 font-mono">
-                  <code>{codeExamples.python}</code>
-                </pre>
-              </div>
-            </TabsContent>
-            <TabsContent value="javascript">
-              <div className="bg-slate-900 rounded-lg p-6 overflow-x-auto">
-                <pre className="text-sm text-slate-300 font-mono">
-                  <code>{codeExamples.javascript}</code>
-                </pre>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
       </div>
     </section>
   );
