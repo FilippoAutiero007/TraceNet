@@ -109,3 +109,54 @@ Le voci gia risolte sono state rimosse.
   - I problemi su `Hero`, `SidebarMenuSkeleton`, router e `ClerkProvider` non sono coperti da test automatici dedicati.
   Impact:
   - Future modifiche manuali al frontend possono introdurre regressioni senza localizzazione rapida del problema.
+
+## Security
+
+Sezione dedicata a miglioramenti futuri per ridurre la superficie di attacco del backend.
+
+- Limitare la dimensione massima dei payload JSON e delle liste configurabili.
+  Per esempio: numero di subnet, ACL rules, VLAN, record DNS, utenti mail e dimensione delle stringhe libere.
+  Obiettivo:
+  - Evitare input volutamente enormi che degradano memoria, CPU o tempi di risposta.
+
+- Introdurre rate limiting sugli endpoint piu costosi.
+  Endpoint candidati:
+  - `/api/parse-network-request`
+  - `/api/generate-pkt`
+  - `/api/generate-pkt-manual`
+  Obiettivo:
+  - Ridurre abuso, brute-force applicativo e consumo eccessivo di risorse.
+
+- Separare meglio gli errori esposti al client dai dettagli interni di eccezione.
+  Stato attuale:
+  - In piu punti il backend ritorna ancora `str(exc)` nel payload.
+  Obiettivo:
+  - Non esporre stack context, path locali o dettagli infrastrutturali a un attaccante.
+
+- Validare piu rigidamente i campi `extra="allow"` usati negli schemi permissivi.
+  Aree candidate:
+  - NAT
+  - ACL
+  - VLAN
+  Obiettivo:
+  - Ridurre la possibilita di chiavi inattese, configurazioni ambigue o input malevoli che passano troppo avanti nella pipeline.
+
+- Aggiungere timeout espliciti e budget di esecuzione sulle operazioni costose di generazione.
+  Obiettivo:
+  - Evitare che richieste patologiche o template problematici tengano occupato il processo troppo a lungo.
+
+- Isolare meglio output e artefatti temporanei per richiesta.
+  Obiettivo:
+  - Rendere piu semplice cleanup, auditing e prevenzione di collisioni tra richieste concorrenti.
+
+- Prevedere cleanup automatico e retention limitata dei file generati in `OUTPUT_DIR`.
+  Obiettivo:
+  - Ridurre crescita incontrollata del disco e rischio di accumulo di artefatti scaricabili.
+
+- Rafforzare i log di sicurezza con request id e classificazione degli errori.
+  Obiettivo:
+  - Rendere tracciabile un abuso senza dover esporre dettagli sensibili al client.
+
+- Valutare esecuzione della generazione PKT in processo o sandbox separata.
+  Obiettivo:
+  - Ridurre l'impatto di input malevoli o bug del generatore sul processo API principale.

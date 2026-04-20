@@ -191,6 +191,7 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             "routing_protocol": request.routing_protocol.value,
             "dhcp_from_router": bool(getattr(request, "dhcp_from_router", False)),
             "dhcp_dns": getattr(request, "dhcp_dns", None),
+            "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
             "XML_VERSION": "8.2.2.0400",
             "topology": request.topology.model_dump() if request.topology else None,
             "dns_records": request.dns_records or [],

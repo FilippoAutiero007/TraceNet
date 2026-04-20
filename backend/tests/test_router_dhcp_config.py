@@ -180,3 +180,30 @@ def test_router_eigrp_network_statements_and_no_auto_summary_are_generated():
     assert " network 172.16.0.0 0.0.255.255" in joined
     assert " network 11.0.0.0 0.0.0.3" in joined
     assert " no auto-summary" in joined
+
+
+def test_router_nat_pat_commands_are_generated():
+    dev_cfg = {
+        "name": "Router0",
+        "interfaces": [
+            {"name": "FastEthernet0/0", "ip": "10.0.0.1", "mask": "255.255.255.0", "role": "lan", "nat": "inside"},
+            {"name": "FastEthernet0/1", "ip": "203.0.113.2", "mask": "255.255.255.252", "role": "wan", "nat": "outside"},
+        ],
+        "nat": {
+            "type": "pat",
+            "acl": "10",
+            "inside_network": "10.0.0.0",
+            "inside_wildcard": "0.0.0.255",
+            "outside_interface": "FastEthernet0/1",
+        },
+    }
+
+    lines = generate_router_config(dev_cfg, all_devices=[dev_cfg], links_config=[])
+    joined = "\n".join(lines)
+
+    assert "interface FastEthernet0/0" in joined
+    assert " ip nat inside" in joined
+    assert "interface FastEthernet0/1" in joined
+    assert " ip nat outside" in joined
+    assert "access-list 10 permit 10.0.0.0 0.0.0.255" in joined
+    assert "ip nat inside source list 10 interface FastEthernet0/1 overload" in joined

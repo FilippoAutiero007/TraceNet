@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.models.schemas import (
     AclConfig,
+    NatConfig,
     RoutingProtocol,
     DeviceConfig,
     PcConfig,
@@ -60,6 +61,10 @@ class ManualNetworkRequest(BaseModel):
     acl: Optional[List[AclConfig]] = Field(
         default=None,
         description="ACL definitions for routers",
+    )
+    nat: Optional[NatConfig] = Field(
+        default=None,
+        description="NAT configuration for routers",
     )
     pcs_config: Optional[List[PcConfig]] = Field(
         default=None,
