@@ -50,7 +50,7 @@ Le voci gia risolte sono state rimosse.
   - [test_pkt_link_metadata.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/tests/test_pkt_link_metadata.py) salta se mancano fixture Packet Tracer di riferimento.
   Impact:
   - In ambienti incompleti la suite puo risultare verde senza coprire davvero i percorsi di integrazione piu importanti.
-
+  - Alcuni test richiedono i template `.pkt` nella cartella `backend/templates/` e le fixture in `backend/tests/fixtures/`. In assenza di questi file i test vengono skippati automaticamente.
 - C'e ancora almeno un test placeholder che non verifica nulla.
   Evidence:
   - [test_pkt_catalog.py](/mnt/c/users/pippo/onedrive/desktop/tracenet/backend/tests/test_pkt_catalog.py) contiene `test_template_path_resolution()` con solo `pass`.
