@@ -311,3 +311,25 @@ class PktGenerateResponse(BaseModel):
     config_summary: Optional[Dict[str, Any]] = None
     subnets: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
+
+
+class PktAnalysisIssue(BaseModel):
+    severity: Literal["error", "warning"]
+    code: str
+    title: str
+    message: str
+    device: Optional[str] = None
+    interface: Optional[str] = None
+    suggestion: Optional[str] = None
+
+
+class PktAnalysisResponse(BaseModel):
+    success: bool
+    filename: Optional[str] = None
+    summary: Optional[str] = None
+    report: Optional[str] = None
+    device_count: int = 0
+    link_count: int = 0
+    issue_count: int = 0
+    issues: List[PktAnalysisIssue] = Field(default_factory=list)
+    error: Optional[str] = None

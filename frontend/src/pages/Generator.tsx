@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
+import { PktAnalyzer } from '@/components/PktAnalyzer';
 import { DownloadResult } from '@/components/DownloadResult';
 import { SEOHead } from '@/components/SEOHead';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { AlertCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertCircle, FileWarning } from 'lucide-react';
+import type { PktAnalysisResponse } from '@/lib/api';
 
 interface SubnetInfo {
   name: string;
@@ -64,6 +68,7 @@ export function Generator() {
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [conversationState, setConversationState] = useState<Record<string, unknown>>({});
+  const [analysisResult, setAnalysisResult] = useState<PktAnalysisResponse | null>(null);
 
   const handleGenerate = async (description: string) => {
     setIsGenerating(true);
@@ -162,6 +167,7 @@ export function Generator() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
               <NetworkInput onGenerate={handleGenerate} isGenerating={isGenerating} />
+              <PktAnalyzer onAnalysisComplete={setAnalysisResult} />
 
               {error && (
                 <Alert variant="destructive" className="bg-red-950 border-red-900">
@@ -183,6 +189,96 @@ export function Generator() {
             </div>
 
             <div className="space-y-6">
+              {analysisResult && (
+                <Card className="border-slate-800 bg-slate-900">
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-amber-300">
+                          <FileWarning className="h-5 w-5" />
+                          PKT Diagnostic Report
+                        </CardTitle>
+                        <CardDescription className="mt-2 text-slate-400">
+                          {analysisResult.filename || 'Uploaded file'}
+                        </CardDescription>
+                      </div>
+                      <Badge className="bg-amber-500 text-slate-950 hover:bg-amber-500">
+                        {analysisResult.issue_count} issue{analysisResult.issue_count === 1 ? '' : 's'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {analysisResult.summary && (
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-200">
+                        {analysisResult.summary}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Devices</p>
+                        <p className="mt-1 text-2xl font-semibold text-white">{analysisResult.device_count}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Links</p>
+                        <p className="mt-1 text-2xl font-semibold text-white">{analysisResult.link_count}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Findings</p>
+                        <p className="mt-1 text-2xl font-semibold text-white">{analysisResult.issue_count}</p>
+                      </div>
+                    </div>
+
+                    {analysisResult.issues.length === 0 ? (
+                      <div className="rounded-lg border border-emerald-900 bg-emerald-950/40 p-4 text-sm text-emerald-200">
+                        Nessun errore evidente trovato nel file `.pkt`.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {analysisResult.issues.map((issue, index) => (
+                          <div
+                            key={`${issue.code}-${index}`}
+                            className={`rounded-lg border p-4 ${
+                              issue.severity === 'error'
+                                ? 'border-red-900 bg-red-950/30'
+                                : 'border-amber-900 bg-amber-950/30'
+                            }`}
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <div>
+                                <p className="font-semibold text-white">{issue.title}</p>
+                                <p className="text-xs uppercase tracking-wide text-slate-400">{issue.code}</p>
+                              </div>
+                              <Badge
+                                variant="secondary"
+                                className={
+                                  issue.severity === 'error'
+                                    ? 'bg-red-500 text-white'
+                                    : 'bg-amber-500 text-slate-950'
+                                }
+                              >
+                                {issue.severity}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-slate-200">{issue.message}</p>
+                            {(issue.device || issue.interface) && (
+                              <p className="mt-2 text-xs text-slate-400">
+                                {[issue.device, issue.interface].filter(Boolean).join(' / ')}
+                              </p>
+                            )}
+                            {issue.suggestion && (
+                              <p className="mt-3 text-sm text-slate-300">
+                                <span className="font-medium text-slate-100">Suggerimento:</span> {issue.suggestion}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               {isDownloadResultData(result) ? (
                 <DownloadResult data={result} />
               ) : (

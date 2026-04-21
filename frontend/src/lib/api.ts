@@ -11,10 +11,26 @@ export interface ParseNetworkResponse {
   json: Record<string, unknown>;
 }
 
-export interface ParseNetworkResponse {
-  intent: 'not_network' | 'incomplete' | 'complete';
-  missing: string[];
-  json: Record<string, unknown>;
+export interface PktAnalysisIssue {
+  severity: 'error' | 'warning';
+  code: string;
+  title: string;
+  message: string;
+  device?: string | null;
+  interface?: string | null;
+  suggestion?: string | null;
+}
+
+export interface PktAnalysisResponse {
+  success: boolean;
+  filename?: string | null;
+  summary?: string | null;
+  report?: string | null;
+  device_count: number;
+  link_count: number;
+  issue_count: number;
+  issues: PktAnalysisIssue[];
+  error?: string | null;
 }
 
 export const apiClient = {
@@ -46,6 +62,23 @@ export const apiClient = {
     }
 
     return response.json();
+  },
+
+  async analyzePktFile(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE_URL}/api/analyze-pkt`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(error.error || error.detail || 'Packet analysis failed');
+    }
+
+    return (await response.json()) as PktAnalysisResponse;
   },
 
   downloadFile(filename: string): string {

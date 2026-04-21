@@ -5,7 +5,7 @@ import logging
 import ipaddress
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
@@ -17,11 +17,13 @@ from app.models.schemas import (
     ParseIntent,
     NormalizedNetworkRequest,
     PktGenerateResponse,
+    PktAnalysisResponse,
     RoutingProtocol,
     SubnetRequest,
     DeviceConfig,
 )
 from app.services.nlp_parser import ParserServiceError, parse_network_request
+from app.services.pkt_analyzer import analyze_pkt_bytes
 from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
@@ -257,6 +259,20 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
         error_msg = f"PKT generation failed: {str(exc)}"
         logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
         return ManualPktGenerateResponse(success=False, error=error_msg)
+
+
+@router.post("/analyze-pkt", response_model=PktAnalysisResponse)
+async def analyze_pkt_file(file: UploadFile = File(...)):
+    """Analyze an uploaded Packet Tracer file and return a diagnostic report."""
+    filename = file.filename or "network.pkt"
+    if not filename.lower().endswith(".pkt"):
+        raise HTTPException(status_code=400, detail="Only .pkt files are supported")
+
+    pkt_data = await file.read()
+    if not pkt_data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    return analyze_pkt_bytes(pkt_data, filename=filename)
 
 
 @router.get("/download/{filename}")

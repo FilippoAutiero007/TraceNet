@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.manual_schemas import ManualNetworkRequest
+from app.services.pkt_crypto import encrypt_pkt_data
 from app.services.nlp_parser import ParserServiceError
 
 
@@ -85,3 +86,64 @@ def test_generate_pkt_manual_forwards_nat_to_pkt_generation(monkeypatch):
         "inside_wildcard": "0.0.0.255",
         "outside_interface": "FastEthernet0/1",
     }
+
+
+def test_analyze_pkt_endpoint_returns_diagnostic_report():
+    xml = """
+    <PACKETTRACER5>
+      <VERSION>8.2.2.0400</VERSION>
+      <NETWORK>
+        <DEVICES>
+          <DEVICE>
+            <ENGINE>
+              <TYPE>Router</TYPE>
+              <NAME>Router0</NAME>
+              <SAVE_REF_ID>save-ref-id:r0</SAVE_REF_ID>
+              <MODULE>
+                <SLOT><MODULE><PORT><TYPE>eCopperFastEthernet</TYPE><IP>192.168.1.1</IP><SUBNET>255.255.255.0</SUBNET><PORT_GATEWAY /></PORT></MODULE></SLOT>
+              </MODULE>
+              <RUNNINGCONFIG>
+                <LINE>interface FastEthernet0/0</LINE>
+                <LINE> ip address 192.168.1.1 255.255.255.0</LINE>
+                <LINE>!</LINE>
+              </RUNNINGCONFIG>
+            </ENGINE>
+            <WORKSPACE><LOGICAL><DEV_ADDR>1</DEV_ADDR><MEM_ADDR>2</MEM_ADDR></LOGICAL></WORKSPACE>
+          </DEVICE>
+          <DEVICE>
+            <ENGINE>
+              <TYPE>Pc</TYPE>
+              <NAME>PC0</NAME>
+              <SAVE_REF_ID>save-ref-id:pc0</SAVE_REF_ID>
+              <MODULE>
+                <SLOT><MODULE><PORT><TYPE>eCopperFastEthernet</TYPE><IP>192.168.1.10</IP><SUBNET>255.255.255.0</SUBNET><PORT_GATEWAY /></PORT></MODULE></SLOT>
+              </MODULE>
+            </ENGINE>
+            <WORKSPACE><LOGICAL><DEV_ADDR>3</DEV_ADDR><MEM_ADDR>4</MEM_ADDR></LOGICAL></WORKSPACE>
+          </DEVICE>
+        </DEVICES>
+        <LINKS>
+          <LINK>
+            <CABLE>
+              <FROM>save-ref-id:r0</FROM>
+              <PORT>FastEthernet0/0</PORT>
+              <TO>save-ref-id:pc0</TO>
+              <PORT>FastEthernet0</PORT>
+            </CABLE>
+          </LINK>
+        </LINKS>
+      </NETWORK>
+    </PACKETTRACER5>
+    """
+    pkt_bytes = encrypt_pkt_data(xml.encode("utf-8"))
+
+    response = client.post(
+        "/api/analyze-pkt",
+        files={"file": ("broken.pkt", pkt_bytes, "application/octet-stream")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["issue_count"] >= 1
+    assert any(issue["code"] == "MISSING_DEFAULT_GATEWAY" for issue in payload["issues"])
