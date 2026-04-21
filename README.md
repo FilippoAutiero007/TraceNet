@@ -6,7 +6,14 @@ Generatore di reti Cisco Packet Tracer (.pkt) da linguaggio naturale con interfa
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![React](https://img.shields.io/badge/React-19-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
+## 🌐 Cos'è TraceNet
 
+TraceNet è uno strumento full-stack che converte descrizioni in linguaggio naturale in file `.pkt` compatibili con **Cisco Packet Tracer 8.x**. Basta descrivere la rete desiderata ("2 router, 3 switch, 10 PC con OSPF e VLAN") e TraceNet genera automaticamente:
+
+- Il file `.pkt` pronto da aprire in Packet Tracer
+- Le configurazioni IOS complete per ogni dispositivo
+- Il calcolo VLSM ottimizzato delle sottoreti
+- Un file XML di debug della topologia generata
 ## 🌟 Funzionalità
 
 ### Backend (Python + FastAPI)
