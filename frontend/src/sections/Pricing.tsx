@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { Check, X, Sparkles, GraduationCap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { SignUpButton } from '@clerk/clerk-react';
+import { SignedIn, SignedOut, SignUpButton } from '@clerk/clerk-react';
+import { CheckoutButton } from '@clerk/clerk-react/experimental';
+
+const CLERK_PRO_PLAN_ID = import.meta.env.VITE_CLERK_PRO_PLAN_ID;
 
 const plans = [
   {
@@ -51,6 +54,7 @@ const plans = [
 
 export function Pricing() {
   const [isYearly, setIsYearly] = useState(false);
+  const proPlanPeriod = isYearly ? 'annual' : 'month';
 
   return (
     <section id="pricing" className="py-24 bg-slate-900">
@@ -144,17 +148,44 @@ export function Pricing() {
                 ))}
               </ul>
 
-              <SignUpButton mode="modal">
-                <Button
-                  className={`w-full ${
-                    plan.popular
-                      ? 'bg-cyan-500 hover:bg-cyan-600 text-white'
-                      : 'bg-slate-800 hover:bg-slate-700 text-white'
-                  }`}
-                >
-                  {plan.cta}
-                </Button>
-              </SignUpButton>
+              {plan.id === 'professional' ? (
+                <>
+                  <SignedIn>
+                    {CLERK_PRO_PLAN_ID ? (
+                      <CheckoutButton
+                        planId={CLERK_PRO_PLAN_ID}
+                        planPeriod={proPlanPeriod}
+                        for="user"
+                        newSubscriptionRedirectUrl="/generator"
+                      >
+                        <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-white">
+                          {plan.cta}
+                        </Button>
+                      </CheckoutButton>
+                    ) : (
+                      <Button
+                        className="w-full bg-cyan-500/70 text-white cursor-not-allowed"
+                        disabled
+                      >
+                        Configura piano Pro
+                      </Button>
+                    )}
+                  </SignedIn>
+                  <SignedOut>
+                    <SignUpButton mode="modal">
+                      <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-white">
+                        {plan.cta}
+                      </Button>
+                    </SignUpButton>
+                  </SignedOut>
+                </>
+              ) : (
+                <SignUpButton mode="modal">
+                  <Button className="w-full bg-slate-800 hover:bg-slate-700 text-white">
+                    {plan.cta}
+                  </Button>
+                </SignUpButton>
+              )}
             </div>
           ))}
         </div>

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models.manual_schemas import ManualNetworkRequest
 from app.services.pkt_crypto import encrypt_pkt_data
+from app.services.auth import AuthContext, get_optional_auth_context, require_pro_user
 from app.services.nlp_parser import ParserServiceError
 
 
@@ -89,6 +90,14 @@ def test_generate_pkt_manual_forwards_nat_to_pkt_generation(monkeypatch):
 
 
 def test_analyze_pkt_endpoint_returns_diagnostic_report():
+    app.dependency_overrides[require_pro_user] = lambda: AuthContext(
+        user_id="user_123",
+        session_id="sess_123",
+        plan="professional",
+        plan_scope="u",
+        is_pro=True,
+        claims={"sub": "user_123", "pla": "u:professional"},
+    )
     xml = """
     <PACKETTRACER5>
       <VERSION>8.2.2.0400</VERSION>
@@ -140,6 +149,7 @@ def test_analyze_pkt_endpoint_returns_diagnostic_report():
     response = client.post(
         "/api/analyze-pkt",
         files={"file": ("broken.pkt", pkt_bytes, "application/octet-stream")},
+        data={"exercise_text": "Rete con gateway e addressing coerente"},
     )
 
     assert response.status_code == 200
@@ -147,3 +157,41 @@ def test_analyze_pkt_endpoint_returns_diagnostic_report():
     assert payload["success"] is True
     assert payload["issue_count"] >= 1
     assert any(issue["code"] == "MISSING_DEFAULT_GATEWAY" for issue in payload["issues"])
+    assert payload["exercise_text"] == "Rete con gateway e addressing coerente"
+    assert payload["review"] is not None
+    assert "things_to_fix" in payload["review"]
+    app.dependency_overrides.clear()
+
+
+def test_get_user_capabilities_endpoint_supports_anonymous_and_pro_users():
+    response = client.get("/api/me/capabilities")
+    assert response.status_code == 200
+    assert response.json() == {
+        "is_authenticated": False,
+        "user_id": None,
+        "plan": None,
+        "plan_scope": None,
+        "is_pro": False,
+        "can_use_pro_pkt_review": False,
+    }
+
+    app.dependency_overrides[get_optional_auth_context] = lambda: AuthContext(
+        user_id="user_456",
+        session_id="sess_456",
+        plan="professional",
+        plan_scope="u",
+        is_pro=True,
+        claims={"sub": "user_456", "pla": "u:professional"},
+    )
+
+    response = client.get("/api/me/capabilities")
+    assert response.status_code == 200
+    assert response.json() == {
+        "is_authenticated": True,
+        "user_id": "user_456",
+        "plan": "professional",
+        "plan_scope": "u",
+        "is_pro": True,
+        "can_use_pro_pkt_review": True,
+    }
+    app.dependency_overrides.clear()

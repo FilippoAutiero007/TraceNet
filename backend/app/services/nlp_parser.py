@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.models.schemas import ParseIntent, ParseNetworkResponse
+from app.services.rag_knowledge import NETWORK_PARSER_DOCUMENTS, retrieve_relevant_documents
 
 logger = logging.getLogger(__name__)
 
@@ -28,33 +29,6 @@ RAG_KNOWLEDGE_BASE = {
         "subnets": [{"name": "string", "required_hosts": "integer >= 1"}],
     },
     "required_fields": ["base_network", "routers", "switches", "pcs", "routing_protocol"],
-    "limits": {
-        "routers": ">= 1",
-        "switches": ">= 0",
-        "pcs": ">= 1",
-        "subnet_required_hosts": ">= 1",
-    },
-    "allowed_values": {
-        "routing_protocol": ["STATIC", "RIP", "OSPF", "EIGRP"],
-        "routing_synonyms": {
-            "static": "STATIC",
-            "static routing": "STATIC",
-            "statico": "STATIC",
-            "rip": "RIP",
-            "ospf": "OSPF",
-            "eigrp": "EIGRP",
-        },
-    },
-    "examples": {
-        "valid": [
-            "Rete 10.0.0.0/24 con 1 router, 2 switch, 30 pc, routing statico",
-            "Network 192.168.10.0/24, routers 2, switches 4, pcs 120, OSPF",
-        ],
-        "invalid": [
-            "Scrivimi una poesia",
-            "Voglio una rete bella senza dettagli",
-        ],
-    },
 }
 
 NETWORK_KEYWORDS = {
@@ -193,6 +167,11 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
         )
 
     client = Mistral(api_key=api_key)
+    retrieved_docs = retrieve_relevant_documents(
+        [user_input, json.dumps(current_state, ensure_ascii=False)],
+        NETWORK_PARSER_DOCUMENTS,
+        limit=3,
+    )
 
     try:
         response = client.chat.complete(
@@ -206,6 +185,7 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
                             "user_input": user_input,
                             "current_state": current_state,
                             "knowledge_base": RAG_KNOWLEDGE_BASE,
+                            "retrieved_context": retrieved_docs,
                         },
                         ensure_ascii=False,
                     ),

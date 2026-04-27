@@ -118,6 +118,7 @@ Sezione dedicata a miglioramenti futuri per ridurre la superficie di attacco del
   Per esempio: numero di subnet, ACL rules, VLAN, record DNS, utenti mail e dimensione delle stringhe libere.
   Obiettivo:
   - Evitare input volutamente enormi che degradano memoria, CPU o tempi di risposta.
+  non imitare troppo tutte le reti sono ammese dalla /1 alla /32 
 
 - Introdurre rate limiting sugli endpoint piu costosi.
   Endpoint candidati:
@@ -160,3 +161,4 @@ Sezione dedicata a miglioramenti futuri per ridurre la superficie di attacco del
 - Valutare esecuzione della generazione PKT in processo o sandbox separata.
   Obiettivo:
   - Ridurre l'impatto di input malevoli o bug del generatore sul processo API principale.
+  - aggiungere ad ogni richiesta del webservice inviare il token del utente (ricavato con klerk) cosi da verificare se puo eseguire quella richiesta se utente pro o meno se ha finito le 10 reti gratuite alla settimana 

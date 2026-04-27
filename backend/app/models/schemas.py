@@ -323,6 +323,15 @@ class PktAnalysisIssue(BaseModel):
     suggestion: Optional[str] = None
 
 
+class PktReviewResult(BaseModel):
+    source: Literal["mistral", "fallback"]
+    exercise_context_provided: bool = False
+    overview: str
+    things_correct: List[str] = Field(default_factory=list)
+    things_to_fix: List[str] = Field(default_factory=list)
+    alignment_with_exercise: Optional[str] = None
+
+
 class PktAnalysisResponse(BaseModel):
     success: bool
     filename: Optional[str] = None
@@ -332,4 +341,15 @@ class PktAnalysisResponse(BaseModel):
     link_count: int = 0
     issue_count: int = 0
     issues: List[PktAnalysisIssue] = Field(default_factory=list)
+    review: Optional[PktReviewResult] = None
+    exercise_text: Optional[str] = None
     error: Optional[str] = None
+
+
+class UserCapabilitiesResponse(BaseModel):
+    is_authenticated: bool
+    user_id: Optional[str] = None
+    plan: Optional[str] = None
+    plan_scope: Optional[Literal["u", "o"]] = None
+    is_pro: bool = False
+    can_use_pro_pkt_review: bool = False

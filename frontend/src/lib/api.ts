@@ -21,6 +21,15 @@ export interface PktAnalysisIssue {
   suggestion?: string | null;
 }
 
+export interface PktReviewResult {
+  source: 'mistral' | 'fallback';
+  exercise_context_provided: boolean;
+  overview: string;
+  things_correct: string[];
+  things_to_fix: string[];
+  alignment_with_exercise?: string | null;
+}
+
 export interface PktAnalysisResponse {
   success: boolean;
   filename?: string | null;
@@ -30,7 +39,25 @@ export interface PktAnalysisResponse {
   link_count: number;
   issue_count: number;
   issues: PktAnalysisIssue[];
+  review?: PktReviewResult | null;
+  exercise_text?: string | null;
   error?: string | null;
+}
+
+export interface UserCapabilitiesResponse {
+  is_authenticated: boolean;
+  user_id?: string | null;
+  plan?: string | null;
+  plan_scope?: 'u' | 'o' | null;
+  is_pro: boolean;
+  can_use_pro_pkt_review: boolean;
+}
+
+function buildAuthHeaders(token?: string | null): HeadersInit | undefined {
+  if (!token) {
+    return undefined;
+  }
+  return { Authorization: `Bearer ${token}` };
 }
 
 export const apiClient = {
@@ -64,12 +91,29 @@ export const apiClient = {
     return response.json();
   },
 
-  async analyzePktFile(file: File) {
+  async getUserCapabilities(token?: string | null) {
+    const response = await fetch(`${API_BASE_URL}/api/me/capabilities`, {
+      headers: buildAuthHeaders(token),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(error.error || error.detail || 'Capabilities lookup failed');
+    }
+
+    return (await response.json()) as UserCapabilitiesResponse;
+  },
+
+  async analyzePktFile(file: File, options?: { exerciseText?: string; token?: string | null }) {
     const formData = new FormData();
     formData.append('file', file);
+    if (options?.exerciseText?.trim()) {
+      formData.append('exercise_text', options.exerciseText.trim());
+    }
 
     const response = await fetch(`${API_BASE_URL}/api/analyze-pkt`, {
       method: 'POST',
+      headers: buildAuthHeaders(options?.token),
       body: formData,
     });
 

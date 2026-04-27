@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { getApiBaseUrl } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@clerk/clerk-react';
+import { apiClient, getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
 import { PktAnalyzer } from '@/components/PktAnalyzer';
 import { DownloadResult } from '@/components/DownloadResult';
@@ -8,8 +9,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, FileWarning } from 'lucide-react';
-import type { PktAnalysisResponse } from '@/lib/api';
+import { AlertCircle, CheckCircle2, FileWarning, Lock, Sparkles } from 'lucide-react';
+import type { PktAnalysisResponse, UserCapabilitiesResponse } from '@/lib/api';
 
 interface SubnetInfo {
   name: string;
@@ -64,11 +65,44 @@ function isDownloadResultData(result: GenerateResponse | null): result is Downlo
 }
 
 export function Generator() {
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [conversationState, setConversationState] = useState<Record<string, unknown>>({});
   const [analysisResult, setAnalysisResult] = useState<PktAnalysisResponse | null>(null);
+  const [capabilities, setCapabilities] = useState<UserCapabilitiesResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCapabilities = async () => {
+      if (!isLoaded) {
+        return;
+      }
+
+      try {
+        const token = isSignedIn ? await getToken() : null;
+        const response = await apiClient.getUserCapabilities(token);
+        if (!cancelled) {
+          setCapabilities(response);
+        }
+      } catch {
+        if (!cancelled) {
+          setCapabilities({
+            is_authenticated: Boolean(isSignedIn),
+            is_pro: false,
+            can_use_pro_pkt_review: false,
+          });
+        }
+      }
+    };
+
+    void loadCapabilities();
+    return () => {
+      cancelled = true;
+    };
+  }, [getToken, isLoaded, isSignedIn]);
 
   const handleGenerate = async (description: string) => {
     setIsGenerating(true);
@@ -167,7 +201,11 @@ export function Generator() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
               <NetworkInput onGenerate={handleGenerate} isGenerating={isGenerating} />
-              <PktAnalyzer onAnalysisComplete={setAnalysisResult} />
+              <PktAnalyzer
+                onAnalysisComplete={setAnalysisResult}
+                capabilities={capabilities}
+                getToken={getToken}
+              />
 
               {error && (
                 <Alert variant="destructive" className="bg-red-950 border-red-900">
@@ -189,6 +227,41 @@ export function Generator() {
             </div>
 
             <div className="space-y-6">
+              <Card className="border-slate-800 bg-slate-900">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-cyan-300">
+                    <Sparkles className="h-5 w-5" />
+                    Stato Piano
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Le funzioni di review `.pkt` importati con correzione guidata sono sbloccate solo per il piano Pro.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {capabilities?.is_pro ? (
+                    <div className="rounded-lg border border-emerald-900 bg-emerald-950/40 p-4 text-sm text-emerald-100">
+                      <div className="flex items-center gap-2 font-medium">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Piano Pro attivo
+                      </div>
+                      <p className="mt-2 text-emerald-200">
+                        Puoi caricare un `.pkt` da correggere e, se vuoi, aggiungere anche il testo della consegna per una review più aderente all'esercizio.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-100">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Lock className="h-4 w-4" />
+                        Funzione Pro bloccata
+                      </div>
+                      <p className="mt-2 text-amber-200">
+                        Il generatore resta disponibile, ma la correzione avanzata dei file `.pkt` importati richiede un piano Pro attivo.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               {analysisResult && (
                 <Card className="border-slate-800 bg-slate-900">
                   <CardHeader>
@@ -211,6 +284,44 @@ export function Generator() {
                     {analysisResult.summary && (
                       <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-200">
                         {analysisResult.summary}
+                      </div>
+                    )}
+
+                    {analysisResult.review && (
+                      <div className="space-y-4 rounded-lg border border-cyan-900 bg-cyan-950/20 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold text-cyan-100">Review Pro</p>
+                          <Badge className="bg-cyan-500 text-slate-950 hover:bg-cyan-500">
+                            {analysisResult.review.source}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-slate-200">{analysisResult.review.overview}</p>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 p-4">
+                            <p className="mb-3 font-medium text-emerald-100">Cose che vanno bene</p>
+                            <ul className="space-y-2 text-sm text-emerald-50">
+                              {analysisResult.review.things_correct.map((item, index) => (
+                                <li key={`good-${index}`}>• {item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div className="rounded-lg border border-amber-900 bg-amber-950/30 p-4">
+                            <p className="mb-3 font-medium text-amber-100">Cose da correggere</p>
+                            <ul className="space-y-2 text-sm text-amber-50">
+                              {analysisResult.review.things_to_fix.map((item, index) => (
+                                <li key={`fix-${index}`}>• {item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+
+                        {analysisResult.review.alignment_with_exercise && (
+                          <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-200">
+                            <p className="mb-2 font-medium text-white">Confronto con la consegna</p>
+                            <p>{analysisResult.review.alignment_with_exercise}</p>
+                          </div>
+                        )}
                       </div>
                     )}
 

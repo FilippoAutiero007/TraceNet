@@ -5,7 +5,7 @@ import logging
 import ipaddress
 from threading import Lock
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
@@ -18,15 +18,18 @@ from app.models.schemas import (
     NormalizedNetworkRequest,
     PktGenerateResponse,
     PktAnalysisResponse,
+    UserCapabilitiesResponse,
     RoutingProtocol,
     SubnetRequest,
     DeviceConfig,
 )
+from app.services.auth import AuthContext, get_optional_auth_context, require_pro_user
 from app.services.nlp_parser import ParserServiceError, parse_network_request
 from app.services.pkt_analyzer import analyze_pkt_bytes
 from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
+from app.services.pkt_review import review_pkt_analysis
 
 _pkt_generation_lock = Lock()
 logger = logging.getLogger(__name__)
@@ -262,8 +265,12 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
 
 
 @router.post("/analyze-pkt", response_model=PktAnalysisResponse)
-async def analyze_pkt_file(file: UploadFile = File(...)):
-    """Analyze an uploaded Packet Tracer file and return a diagnostic report."""
+async def analyze_pkt_file(
+    file: UploadFile = File(...),
+    exercise_text: str | None = Form(default=None),
+    _auth: AuthContext = Depends(require_pro_user),
+):
+    """Analyze an uploaded Packet Tracer file and return a Pro diagnostic report."""
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise HTTPException(status_code=400, detail="Only .pkt files are supported")
@@ -272,7 +279,29 @@ async def analyze_pkt_file(file: UploadFile = File(...)):
     if not pkt_data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    return analyze_pkt_bytes(pkt_data, filename=filename)
+    analysis = analyze_pkt_bytes(pkt_data, filename=filename)
+    analysis.exercise_text = exercise_text
+    if analysis.success:
+        analysis.review = review_pkt_analysis(analysis, exercise_text)
+    return analysis
+
+
+@router.get("/me/capabilities", response_model=UserCapabilitiesResponse)
+async def get_user_capabilities(
+    auth: AuthContext | None = Depends(get_optional_auth_context),
+):
+    """Return the authenticated user's current feature capabilities."""
+    if auth is None:
+        return UserCapabilitiesResponse(is_authenticated=False, is_pro=False, can_use_pro_pkt_review=False)
+
+    return UserCapabilitiesResponse(
+        is_authenticated=True,
+        user_id=auth.user_id,
+        plan=auth.plan,
+        plan_scope=auth.plan_scope if auth.plan_scope in {"u", "o"} else None,
+        is_pro=auth.is_pro,
+        can_use_pro_pkt_review=auth.is_pro,
+    )
 
 
 @router.get("/download/{filename}")

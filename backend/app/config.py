@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     
     # API Keys
     mistral_api_key: Optional[str] = Field(default=None, description="Mistral AI API key")
+    clerk_jwks_url: str = Field(default="https://api.clerk.com/v1/jwks", description="Clerk JWKS endpoint")
+    clerk_pro_plan_slugs: str = Field(
+        default="professional,pro",
+        description="Comma-separated Clerk plan slugs that unlock Pro features",
+    )
+    clerk_authorized_parties: str = Field(
+        default="",
+        description="Optional comma-separated allowed azp/origin values for Clerk session tokens",
+    )
     
     # Directories
     output_dir: Path = Field(default=Path("/tmp/tracenet"), description="Output directory for generated files")
