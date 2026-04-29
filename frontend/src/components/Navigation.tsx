@@ -9,9 +9,11 @@ export function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navLinks = [
-    { href: '#features', label: 'Funzionalità' },
-    { href: '#pricing', label: 'Prezzi' },
-    { href: '#dashboard', label: 'Dashboard' },
+    { href: '/intro', label: 'Introduzione' },
+    { href: '/features', label: 'Funzionalità' },
+    { href: '/pricing', label: 'Prezzi' },
+    { href: '/free', label: 'Gratis' },
+    { href: '/pro', label: 'Pro' },
   ];
 
   return (
@@ -21,19 +23,19 @@ export function Navigation() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
             <Network className="w-8 h-8 text-cyan-400" />
-            <span className="text-xl font-bold text-white">NetTrace</span>
+            <span className="text-xl font-bold text-white">TraceNet</span>
           </Link>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
-              <a
+              <Link
                 key={link.href}
-                href={link.href}
+                to={link.href}
                 className="text-slate-300 hover:text-cyan-400 transition-colors text-sm font-medium"
               >
                 {link.label}
-              </a>
+              </Link>
             ))}
           </div>
 
@@ -77,14 +79,14 @@ export function Navigation() {
           <div className="md:hidden py-4 border-t border-slate-800">
             <div className="flex flex-col gap-4">
               {navLinks.map((link) => (
-                <a
+                <Link
                   key={link.href}
-                  href={link.href}
+                  to={link.href}
                   className="text-slate-300 hover:text-cyan-400 transition-colors px-2 py-1"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   {link.label}
-                </a>
+                </Link>
               ))}
               <div className="flex flex-col gap-2 pt-4 border-t border-slate-800">
                 <Link to="/generator" onClick={() => setMobileMenuOpen(false)}>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Play, Activity, Shield, Zap } from 'lucide-react';
 import { SignUpButton } from '@clerk/clerk-react';
+import { ParticleEffect } from '@/components/ParticleEffect';
 
 export function Hero() {
   const [isHovered, setIsHovered] = useState(false);
@@ -95,14 +96,20 @@ export function Hero() {
             <span className="text-cyan-400 text-sm font-medium">Simulazione di Rete Intelligente</span>
           </div>
 
-          {/* Main Heading */}
-          <h1 className="text-7xl sm:text-8xl md:text-9xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-8 tracking-tighter animate-in fade-in zoom-in duration-1000 hover:scale-105 transition-transform duration-300"
-              style={{
-                filter: 'drop-shadow(0 0 30px rgba(6,182,212,0.5))',
-                textShadow: '0 0 60px rgba(6,182,212,0.3)'
-              }}>
-            NET TRACE
-          </h1>
+          {/* Particle Effect Behind Title */}
+          <div className="relative mb-8">
+            <ParticleEffect />
+            {/* Main Heading */}
+            <h1 className="relative text-7xl sm:text-8xl md:text-9xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 tracking-tighter animate-in fade-in zoom-in duration-1000 hover:scale-105 transition-transform duration-300"
+                style={{
+                  filter: 'drop-shadow(0 0 30px rgba(6,182,212,0.5))',
+                  textShadow: '0 0 60px rgba(6,182,212,0.3)',
+                  position: 'relative',
+                  zIndex: 10
+                }}>
+              TRACENET
+            </h1>
+          </div>
 
           {/* Subtitle */}
           <p className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-10">
