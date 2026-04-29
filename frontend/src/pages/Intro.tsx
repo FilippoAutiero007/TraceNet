@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 export function Intro() {
   const navigate = useNavigate();
 
-  return (
+  return ( 
     <div className="min-h-screen bg-black flex flex-col">
       {/* Hero Section with Particle Effect */}
       <section className="relative flex-1 flex items-center justify-center overflow-hidden">
