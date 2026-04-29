@@ -12,32 +12,32 @@ export function ParticleEffect() {
 
     let W: number, H: number;
     let particles: Particle[] = [];
-    let mouse = { x: -999, y: -999 };
+    const mouse = { x: -999, y: -999 };
     const N = 120, REPEL = 120, FORCE = 6;
 
     function resize() {
-      const r = canvas.getBoundingClientRect();
-      W = canvas.width = r.width;
-      H = canvas.height = 500;
+      const r = canvas!.getBoundingClientRect();
+      W = canvas!.width = r.width;
+      H = canvas!.height = 500;
     }
 
-    function hsl(h: number, s: number, l: number) { 
-      return `hsl(${h},${s}%,${l}%)`; 
+    function hsl(h: number, s: number, l: number) {
+      return `hsl(${h},${s}%,${l}%)`;
     }
 
     class Particle {
-      x: number;
-      y: number;
-      ox: number;
-      oy: number;
-      vx: number;
-      vy: number;
-      r: number;
-      hue: number;
-      alpha: number;
+      x!: number;
+      y!: number;
+      ox!: number;
+      oy!: number;
+      vx!: number;
+      vy!: number;
+      r!: number;
+      hue!: number;
+      alpha!: number;
 
-      constructor() { 
-        this.reset(); 
+      constructor() {
+        this.reset();
       }
 
       reset() {
@@ -71,12 +71,12 @@ export function ParticleEffect() {
       }
 
       draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = hsl(this.hue, 80, 70);
-        ctx.globalAlpha = this.alpha;
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        ctx!.beginPath();
+        ctx!.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx!.fillStyle = hsl(this.hue, 80, 70);
+        ctx!.globalAlpha = this.alpha;
+        ctx!.fill();
+        ctx!.globalAlpha = 1;
       }
     }
 
@@ -92,14 +92,14 @@ export function ParticleEffect() {
           const dy = particles[i].y - particles[j].y;
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d < 90) {
-            ctx.beginPath();
-            ctx.moveTo(particles[i].x, particles[i].y);
-            ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = hsl(220, 70, 70);
-            ctx.globalAlpha = (1 - d / 90) * 0.18;
-            ctx.lineWidth = 0.6;
-            ctx.stroke();
-            ctx.globalAlpha = 1;
+            ctx!.beginPath();
+            ctx!.moveTo(particles[i].x, particles[i].y);
+            ctx!.lineTo(particles[j].x, particles[j].y);
+            ctx!.strokeStyle = hsl(220, 70, 70);
+            ctx!.globalAlpha = (1 - d / 90) * 0.18;
+            ctx!.lineWidth = 0.6;
+            ctx!.stroke();
+            ctx!.globalAlpha = 1;
           }
         }
       }
@@ -107,50 +107,50 @@ export function ParticleEffect() {
 
     function drawCursor() {
       if (mouse.x < 0) return;
-      ctx.beginPath();
-      ctx.arc(mouse.x, mouse.y, 6, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(180,200,255,0.7)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(mouse.x, mouse.y, REPEL, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(150,170,255,0.1)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      ctx!.beginPath();
+      ctx!.arc(mouse.x, mouse.y, 6, 0, Math.PI * 2);
+      ctx!.strokeStyle = 'rgba(180,200,255,0.7)';
+      ctx!.lineWidth = 1.5;
+      ctx!.stroke();
+      ctx!.beginPath();
+      ctx!.arc(mouse.x, mouse.y, REPEL, 0, Math.PI * 2);
+      ctx!.strokeStyle = 'rgba(150,170,255,0.1)';
+      ctx!.lineWidth = 1;
+      ctx!.stroke();
     }
 
     function loop() {
-      ctx.clearRect(0, 0, W, H);
+      ctx!.clearRect(0, 0, W, H);
       drawConnections();
-      for (const p of particles) { 
-        p.update(); 
-        p.draw(); 
+      for (const p of particles) {
+        p.update();
+        p.draw();
       }
       drawCursor();
       requestAnimationFrame(loop);
     }
 
     const handleMouseMove = (e: MouseEvent) => {
-      const r = canvas.getBoundingClientRect();
+      const r = canvas!.getBoundingClientRect();
       mouse.x = e.clientX - r.left;
       mouse.y = e.clientY - r.top;
     };
 
-    const handleMouseLeave = () => { 
-      mouse.x = -999; 
-      mouse.y = -999; 
+    const handleMouseLeave = () => {
+      mouse.x = -999;
+      mouse.y = -999;
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       e.preventDefault();
-      const r = canvas.getBoundingClientRect();
+      const r = canvas!.getBoundingClientRect();
       mouse.x = e.touches[0].clientX - r.left;
       mouse.y = e.touches[0].clientY - r.top;
     };
 
-    const handleTouchEnd = () => { 
-      mouse.x = -999; 
-      mouse.y = -999; 
+    const handleTouchEnd = () => {
+      mouse.x = -999;
+      mouse.y = -999;
     };
 
     canvas.addEventListener('mousemove', handleMouseMove);
@@ -162,9 +162,9 @@ export function ParticleEffect() {
     initParticles();
     loop();
 
-    const handleResize = () => { 
-      resize(); 
-      initParticles(); 
+    const handleResize = () => {
+      resize();
+      initParticles();
     };
     window.addEventListener('resize', handleResize);
 
@@ -178,7 +178,7 @@ export function ParticleEffect() {
   }, []);
 
   return (
-    <canvas 
+    <canvas
       ref={canvasRef}
       className="absolute inset-0 w-full h-full pointer-events-auto"
       style={{ height: '500px' }}

@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Check, Star, Zap, Shield, Crown } from 'lucide-react';
+import { ArrowRight, Check, Star, Zap, Crown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export function Pricing() {
@@ -124,7 +124,7 @@ export function Pricing() {
                   <div className="w-16 h-16 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                     <plan.icon className="w-8 h-8 text-cyan-400" />
                   </div>
-                  
+
                   <h3 className="text-3xl font-bold text-white mb-2">{plan.name}</h3>
                   <div className="flex items-baseline justify-center gap-1 mb-4">
                     <span className="text-5xl font-bold text-white">{plan.price}</span>
@@ -170,7 +170,7 @@ export function Pricing() {
       <section className="py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-4xl font-bold text-white text-center mb-16">Domande Frequenti</h2>
-          
+
           <div className="space-y-6">
             {[
               {
@@ -187,7 +187,7 @@ export function Pricing() {
               },
               {
                 question: 'Come funziona la fatturazione?',
-                answer: 'La fatturazione è mensile o annuale. Con l\'abbonamento annuale risparmi il 20% rispetto al piano mensile.'
+                answer: "La fatturazione è mensile o annuale. Con l'abbonamento annuale risparmi il 20% rispetto al piano mensile."
               }
             ].map((faq, index) => (
               <div key={index} className="p-6 rounded-2xl bg-slate-900/50 border border-slate-800">

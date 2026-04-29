@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Crown, Zap, Shield, Users, Database, BarChart3, Code2, Settings, Check, Star } from 'lucide-react';
+import { ArrowRight, Crown, Zap, Shield, Users, Database, BarChart3, Code2, Settings, Star } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export function Pro() {
@@ -26,7 +25,7 @@ export function Pro() {
       name: 'Marco Rossi',
       role: 'Network Engineer',
       company: 'TechCorp',
-      content: 'TraceNet Pro ha rivoluzionato il nostro workflow di analisi di rete. L\'API è fantastica!',
+      content: "TraceNet Pro ha rivoluzionato il nostro workflow di analisi di rete. L'API è fantastica!",
       rating: 5
     },
     {
@@ -58,7 +57,7 @@ export function Pro() {
               TraceNet Pro
             </h1>
             <p className="text-xl text-slate-300 max-w-3xl mx-auto mb-8">
-              Potenza illimitata per professionisti e team che richiedono il massimo dall'analisi di rete.
+              Potenza illimitata per professionisti e team che richiedono il massimo dall&apos;analisi di rete.
             </p>
           </div>
 
@@ -96,7 +95,7 @@ export function Pro() {
               </div>
               <CardTitle className="text-3xl text-white">Piano Pro</CardTitle>
               <CardDescription className="text-slate-300 text-lg">
-                Tutto ciò di cui hai bisogno per l'analisi di rete professionale
+                Tutto ciò di cui hai bisogno per l&apos;analisi di rete professionale
               </CardDescription>
               <div className="flex items-baseline justify-center gap-2 mt-4">
                 <span className="text-6xl font-bold text-white">
@@ -106,7 +105,7 @@ export function Pro() {
               </div>
               {selectedPlan === 'annual' && (
                 <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-                  Risparmi €72 all'anno
+                  Risparmi €72 all&apos;anno
                 </Badge>
               )}
             </CardHeader>
@@ -118,7 +117,7 @@ export function Pro() {
                 Inizia Pro Trial di 14 giorni
                 <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
-              
+
               <div className="text-center text-slate-400 text-sm">
                 Nessuna carta di credito richiesta per il trial
               </div>
@@ -133,7 +132,7 @@ export function Pro() {
           <h2 className="text-4xl font-bold text-white text-center mb-16">
             Funzionalità Esclusive Pro
           </h2>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {proFeatures.map((feature, index) => (
               <Card key={index} className="bg-slate-900/50 border-slate-800 hover:border-cyan-500/50 transition-all duration-300 group">
@@ -156,7 +155,7 @@ export function Pro() {
           <h2 className="text-4xl font-bold text-white text-center mb-16">
             Free vs Pro
           </h2>
-          
+
           <Card className="bg-slate-900/50 border-slate-800">
             <CardContent className="p-0">
               <div className="grid md:grid-cols-3">
@@ -170,7 +169,7 @@ export function Pro() {
                   <h3 className="text-xl font-bold text-purple-400 mb-4">Pro</h3>
                 </div>
               </div>
-              
+
               {[
                 { feature: 'Pacchetti per sessione', free: '1.000', pro: '100.000+' },
                 { feature: 'Team members', free: '1', pro: '5' },
@@ -208,7 +207,7 @@ export function Pro() {
           <h2 className="text-4xl font-bold text-white text-center mb-16">
             Cosa Dicono i Nostri Clienti Pro
           </h2>
-          
+
           <div className="grid md:grid-cols-3 gap-8">
             {testimonials.map((testimonial, index) => (
               <Card key={index} className="bg-slate-900/50 border-slate-800 hover:border-cyan-500/50 transition-colors">
@@ -218,7 +217,7 @@ export function Pro() {
                       <Star key={i} className="w-5 h-5 text-yellow-400 fill-current" />
                     ))}
                   </div>
-                  <p className="text-slate-300 mb-6 italic">"{testimonial.content}"</p>
+                  <p className="text-slate-300 mb-6 italic">&quot;{testimonial.content}&quot;</p>
                   <div>
                     <p className="text-white font-semibold">{testimonial.name}</p>
                     <p className="text-slate-500 text-sm">{testimonial.role} @ {testimonial.company}</p>
