@@ -76,7 +76,7 @@ export function Hero() {
         })}
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes float {
           0%, 100% { transform: translateY(0px) scale(1); opacity: 0.3; }
           50% { transform: translateY(-20px) scale(1.1); opacity: 0.8; }
@@ -106,7 +106,7 @@ export function Hero() {
 
           {/* Subtitle */}
           <p className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-10">
-            NetTrace è lo strumento automatizzato per la tracciatura e l'analisi dei pacchetti di rete.
+            NetTrace è lo strumento automatizzato per la tracciatura e l&apos;analisi dei pacchetti di rete.
             Simula, traccia e analizza il comportamento dei pacchetti in reti complesse.
           </p>
 

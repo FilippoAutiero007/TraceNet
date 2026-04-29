@@ -3,9 +3,7 @@ import {
   Network, 
   Cpu, 
   BarChart3, 
-  FileCode, 
-  Code2,
-  Terminal
+  FileCode
 } from 'lucide-react';
 
 const features = [
