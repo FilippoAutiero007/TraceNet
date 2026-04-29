@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 export function Features() {
   const navigate = useNavigate();
-
+ 
   const features = [
     {
       icon: Activity,
