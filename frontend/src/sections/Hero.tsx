@@ -126,7 +126,7 @@ export function Hero() {
           </p>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-24">
             <Button
               size="lg"
               className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg group"
@@ -137,11 +137,19 @@ export function Hero() {
               Inizia Gratuitamente
               <ArrowRight className={`w-5 h-5 ml-2 transition-transform ${isHovered ? 'translate-x-1' : ''}`} />
             </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="border-slate-700 text-slate-300 hover:bg-slate-800 px-8 py-6 text-lg"
+              onClick={() => document.getElementById('cisco-section')?.scrollIntoView({ behavior: 'smooth' })}
+            >
+              Scarica Cisco
+            </Button>
           </div>
         </div>
 
         {/* Feature Cards */}
-        <div className="grid md:grid-cols-3 gap-6 mt-20">
+        <div className="grid md:grid-cols-3 gap-6 mt-32">
           {[
             {
               icon: Zap,
@@ -171,7 +179,7 @@ export function Hero() {
         </div>
 
         {/* Non hai Cisco? Section */}
-        <div className="mt-60 text-center">
+        <div id="cisco-section" className="mt-60 text-center">
           <h2 className="text-2xl font-bold text-white mb-8">Non hai Cisco Packet Tracer?</h2>
           <div className="max-w-4xl mx-auto p-12 rounded-2xl bg-slate-900/50 border border-slate-800">
             <p className="text-slate-300 mb-6">

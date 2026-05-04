@@ -7,7 +7,7 @@
   </head>
   <body>
     <div id="root"></div>
-    <canvas id="c" style="display:block;width:100%;height:500px;cursor:none;"></canvas>
+    <canvas id="c" style="display:block;width:100%;height:500px;cursor:none;position:fixed;top:0;left:0;z-index:-1;pointer-events:none;"></canvas>
     <script>
     const canvas = document.getElementById('c');
     const ctx = canvas.getContext('2d');
