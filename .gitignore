@@ -78,3 +78,6 @@ backend/.env*
 backend/test_output*/
 
 .venv-linux/
+
+# Executables
+eseguibile/

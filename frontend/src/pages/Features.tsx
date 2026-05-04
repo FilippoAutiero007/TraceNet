@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Shield, Zap, Activity, Globe, Database, Cpu, Lock, BarChart3, Code2, Users, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Footer } from '@/sections/Footer';
 
 export function Features() {
   const navigate = useNavigate();
@@ -8,9 +9,9 @@ export function Features() {
   const features = [
     {
       icon: Activity,
-      title: 'Simulazione Real-time',
-      description: 'Visualizza il flusso dei pacchetti in tempo reale con animazioni fluide e interattive.',
-      details: ['Monitoraggio live', 'Animazioni fluide', 'Interfaccia responsive']
+      title: 'Generatore di file .pkt',
+      description: 'Genera una rete Cisco con una semplice descrizione.',
+      details: ['Descrizione in linguaggio naturale', 'File .pkt pronto per Packet Tracer', 'Topologie personalizzabili']
     },
     {
       icon: Shield,
@@ -20,9 +21,9 @@ export function Features() {
     },
     {
       icon: Database,
-      title: 'Report Dettagliati',
-      description: 'Esporta analisi in formato PCAP, JSON e CSV per integrazioni avanzate.',
-      details: ['Multi-formato', 'Export automatico', 'API integration']
+      title: 'Analisi File .pkt',
+      description: 'Carica il tuo file .pkt e analizzalo per capire dove hai sbagliato.',
+      details: ['Correzione automatica', 'Suggerimenti dettagliati', 'Report in PDF']
     },
     {
       icon: Zap,
@@ -75,7 +76,7 @@ export function Features() {
   ];
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto text-center">
@@ -98,9 +99,8 @@ export function Features() {
             </Button>
             <Button
               size="lg"
-              variant="outline"
-              className="border-slate-700 text-slate-300 hover:bg-slate-800 px-8 py-6 text-lg"
-              onClick={() => navigate('/free')}
+              className="bg-white hover:bg-gray-100 text-black px-8 py-6 text-lg font-semibold"
+              onClick={() => navigate('/generator')}
             >
               Prova Gratis
             </Button>
@@ -138,36 +138,7 @@ export function Features() {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="p-12 rounded-3xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20">
-            <h2 className="text-4xl font-bold text-white mb-6">
-              Pronto a Rivoluzionare la Tua Analisi di Rete?
-            </h2>
-            <p className="text-xl text-slate-300 mb-8">
-              Unisciti a migliaia di professionisti che già utilizzano TraceNet per ottimizzare le loro reti.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Button
-                size="lg"
-                className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg"
-                onClick={() => navigate('/free')}
-              >
-                Inizia Gratis
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="border-slate-700 text-slate-300 hover:bg-slate-800 px-8 py-6 text-lg"
-                onClick={() => navigate('/pro')}
-              >
-                Scopri il Pro
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <Footer />
     </div>
   );
 }

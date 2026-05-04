@@ -27,7 +27,7 @@ export function Free() {
   ];
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
@@ -57,7 +57,7 @@ export function Free() {
                   <Upload className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
                   <p className="text-slate-300 mb-2">Trascina qui i tuoi file PCAP</p>
                   <p className="text-slate-500 text-sm mb-4">o</p>
-                  <Button variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">
+                  <Button variant="outline" className="border-slate-300 text-black hover:bg-slate-200">
                     Scegli File
                   </Button>
                 </div>
@@ -147,49 +147,7 @@ export function Free() {
             ))}
           </div>
 
-          {/* Limitations */}
-          <Card className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 max-w-4xl mx-auto">
-            <CardContent className="p-8">
-              <h3 className="text-2xl font-bold text-white mb-4">Limitazioni del Piano Free</h3>
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="text-lg font-semibold text-amber-400 mb-3">Disponibile in Free:</h4>
-                  <ul className="space-y-2">
-                    <li className="flex items-center text-slate-300">
-                      <div className="w-2 h-2 bg-green-400 rounded-full mr-3"></div>
-                      Analisi base fino a 1.000 pacchetti
-                    </li>
-                    <li className="flex items-center text-slate-300">
-                      <div className="w-2 h-2 bg-green-400 rounded-full mr-3"></div>
-                      Export in formato CSV
-                    </li>
-                    <li className="flex items-center text-slate-300">
-                      <div className="w-2 h-2 bg-green-400 rounded-full mr-3"></div>
-                      Supporto community
-                    </li>
-                  </ul>
-                </div>
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-500 mb-3">Non disponibile:</h4>
-                  <ul className="space-y-2">
-                    <li className="flex items-center text-slate-500 opacity-60">
-                      <div className="w-2 h-2 bg-slate-600 rounded-full mr-3"></div>
-                      API access
-                    </li>
-                    <li className="flex items-center text-slate-500 opacity-60">
-                      <div className="w-2 h-2 bg-slate-600 rounded-full mr-3"></div>
-                      Team collaboration
-                    </li>
-                    <li className="flex items-center text-slate-500 opacity-60">
-                      <div className="w-2 h-2 bg-slate-600 rounded-full mr-3"></div>
-                      Advanced analytics
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+          </div>
       </section>
 
       {/* CTA Section */}

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { apiClient, getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
-import { PktAnalyzer } from '@/components/PktAnalyzer';
 import { DownloadResult } from '@/components/DownloadResult';
 import { SEOHead } from '@/components/SEOHead';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -11,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle, CheckCircle2, FileWarning, Lock, Sparkles } from 'lucide-react';
 import type { PktAnalysisResponse, UserCapabilitiesResponse } from '@/lib/api';
+import { Footer } from '@/sections/Footer';
 
 interface SubnetInfo {
   name: string;
@@ -189,23 +189,20 @@ export function Generator() {
         ogUrl="https://nettrace.app/generator"
         canonicalUrl="https://nettrace.app/generator"
       />
-      <div className="min-h-screen bg-slate-950 py-12 px-4">
+      <div className="min-h-screen py-24 px-4">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
-            <h1 className="text-4xl font-bold text-white mb-4">Network Generator</h1>
-            <p className="text-slate-400 text-lg">
-              Generate Cisco Packet Tracer networks from natural language descriptions
+            <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-6">
+              Network Generator
+            </h1>
+            <p className="text-xl text-slate-300 max-w-3xl mx-auto">
+              Genera reti Cisco Packet Tracer da descrizioni in linguaggio naturale
             </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
               <NetworkInput onGenerate={handleGenerate} isGenerating={isGenerating} />
-              <PktAnalyzer
-                onAnalysisComplete={setAnalysisResult}
-                capabilities={capabilities}
-                getToken={getToken}
-              />
 
               {error && (
                 <Alert variant="destructive" className="bg-red-950 border-red-900">
@@ -227,41 +224,6 @@ export function Generator() {
             </div>
 
             <div className="space-y-6">
-              <Card className="border-slate-800 bg-slate-900">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-cyan-300">
-                    <Sparkles className="h-5 w-5" />
-                    Stato Piano
-                  </CardTitle>
-                  <CardDescription className="text-slate-400">
-                    Le funzioni di review `.pkt` importati con correzione guidata sono sbloccate solo per il piano Pro.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {capabilities?.is_pro ? (
-                    <div className="rounded-lg border border-emerald-900 bg-emerald-950/40 p-4 text-sm text-emerald-100">
-                      <div className="flex items-center gap-2 font-medium">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Piano Pro attivo
-                      </div>
-                      <p className="mt-2 text-emerald-200">
-                        Puoi caricare un `.pkt` da correggere e, se vuoi, aggiungere anche il testo della consegna per una review più aderente all'esercizio.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-100">
-                      <div className="flex items-center gap-2 font-medium">
-                        <Lock className="h-4 w-4" />
-                        Funzione Pro bloccata
-                      </div>
-                      <p className="mt-2 text-amber-200">
-                        Il generatore resta disponibile, ma la correzione avanzata dei file `.pkt` importati richiede un piano Pro attivo.
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
               {analysisResult && (
                 <Card className="border-slate-800 bg-slate-900">
                   <CardHeader>
@@ -417,6 +379,7 @@ export function Generator() {
           </div>
         </div>
       </div>
+      <Footer />
     </>
   );
 }

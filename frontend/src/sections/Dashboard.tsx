@@ -78,7 +78,7 @@ export function Dashboard() {
   }, [nodes, links]);
 
   return (
-    <section id="dashboard" className="py-24 bg-slate-950">
+    <section id="dashboard" className="py-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8 flex justify-between items-end">
           <div>
@@ -90,7 +90,7 @@ export function Dashboard() {
               size="sm"
               variant={isSimulating ? 'destructive' : 'default'}
               onClick={isSimulating ? stopSimulation : startSimulation}
-              className={!isSimulating ? "bg-cyan-500 hover:bg-cyan-600" : ""}
+              className={!isSimulating ? "bg-white hover:bg-gray-100 text-black" : ""}
             >
               {isSimulating ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
               {isSimulating ? 'Pausa' : 'Avvia'}

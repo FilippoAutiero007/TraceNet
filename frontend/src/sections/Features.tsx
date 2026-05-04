@@ -1,58 +1,30 @@
 import { useState } from 'react';
 import { 
   Network, 
-  Cpu, 
-  BarChart3, 
   FileCode
 } from 'lucide-react';
 
 const features = [
   {
-    id: 'simulation',
+    id: 'generator',
     icon: Network,
-    title: 'Simulazione di Rete',
-    description: 'Crea e simula reti complesse con topologie personalizzabili.',
+    title: 'Generatore di file .pkt',
+    description: 'Genera una rete Cisco con una semplice descrizione.',
     details: [
-      'Topologie: Mesh, Star, Bus, Ring',
-      'Configurazione drag-and-drop',
-      'Parametri personalizzabili (delay, bandwidth, packet loss)',
-      'Salvataggio progetti multipli',
+      'Descrizione in linguaggio naturale',
+      'File .pkt pronto per Packet Tracer',
+      'Topologie personalizzabili',
     ],
   },
   {
-    id: 'tracing',
-    icon: Cpu,
-    title: 'Tracciamento Pacchetti',
-    description: 'Traccia ogni pacchetto attraverso la rete in tempo reale.',
-    details: [
-      'Visualizzazione percorso pacchetti',
-      'Timestamp precisi',
-      'Analisi header a ogni hop',
-      'Highlighting errori e perdite',
-    ],
-  },
-  {
-    id: 'analysis',
-    icon: BarChart3,
-    title: 'Analisi Avanzata',
-    description: 'Ottieni insight dettagliati sulle performance della rete.',
-    details: [
-      'Statistiche in tempo reale',
-      'Metriche di latenza e throughput',
-      'Grafici e visualizzazioni',
-      'Confronto tra simulazioni',
-    ],
-  },
-  {
-    id: 'export',
+    id: 'analisi',
     icon: FileCode,
-    title: 'Esportazione Dati',
-    description: 'Esporta i risultati in vari formati per analisi esterne.',
+    title: 'Analisi File .pkt',
+    description: 'Carica il tuo file .pkt e analizzalo per capire dove hai sbagliato.',
     details: [
-      'Formato PCAP compatibile Wireshark',
-      'JSON per integrazioni API',
-      'CSV per analisi in Excel',
-      'Report PDF automatici',
+      'Correzione automatica',
+      'Suggerimenti dettagliati',
+      'Report in PDF',
     ],
   },
 ];
@@ -62,17 +34,13 @@ export function Features() {
   const [activeFeature, setActiveFeature] = useState('simulation');
 
   return (
-    <section id="features" className="py-24 bg-slate-950">
+    <section id="features" className="py-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
-            Funzionalità Potenti per Professionisti
+            Funzionalità
           </h2>
-          <p className="text-slate-400 max-w-2xl mx-auto">
-            Tutto ciò di cui hai bisogno per simulare, tracciare e analizzare reti complesse 
-            in un unico strumento intuitivo.
-          </p>
         </div>
 
         {/* Features Grid */}

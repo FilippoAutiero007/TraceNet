@@ -45,7 +45,7 @@ export function Pro() {
   ];
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
@@ -67,7 +67,7 @@ export function Pro() {
               <button
                 className={`px-6 py-2 rounded-md transition-colors ${
                   selectedPlan === 'monthly'
-                    ? 'bg-cyan-500 text-white'
+                    ? 'bg-white text-black'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 onClick={() => setSelectedPlan('monthly')}
@@ -77,7 +77,7 @@ export function Pro() {
               <button
                 className={`px-6 py-2 rounded-md transition-colors ${
                   selectedPlan === 'annual'
-                    ? 'bg-cyan-500 text-white'
+                    ? 'bg-white text-black'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 onClick={() => setSelectedPlan('annual')}
@@ -251,7 +251,7 @@ export function Pro() {
                 size="lg"
                 variant="outline"
                 className="border-slate-700 text-slate-300 hover:bg-slate-800 px-8 py-6 text-lg"
-                onClick={() => navigate('/free')}
+                onClick={() => navigate('/pricing')}
               >
                 Confronta con Free
               </Button>

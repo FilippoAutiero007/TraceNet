@@ -112,7 +112,7 @@ export function DownloadResult({ data }: DownloadResultProps) {
         {/* Download Buttons */}
         <div className="space-y-3">
           <Button
-            className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-6 text-base"
+            className="w-full bg-white hover:bg-gray-100 text-black font-semibold py-6 text-base"
             onClick={() => window.open(pktUrl, '_blank')}
           >
             <Download className="mr-2 h-5 w-5" />

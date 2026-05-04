@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X, Sparkles, GraduationCap } from 'lucide-react';
+import { Check, X, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { SignedIn, SignedOut, SignUpButton } from '@clerk/clerk-react';
@@ -8,26 +8,6 @@ import { CheckoutButton } from '@clerk/clerk-react/experimental';
 const CLERK_PRO_PLAN_ID = import.meta.env.VITE_CLERK_PRO_PLAN_ID;
 
 const plans = [
-  {
-    id: 'free',
-    name: 'Free',
-    description: 'Per studenti e hobbisti',
-    price: { monthly: 0, yearly: 0 },
-    icon: GraduationCap,
-    features: [
-      { text: '5 nodi per simulazione', included: true },
-      { text: '5 progetti salvati', included: true },
-      { text: 'Topologie base', included: true },
-      { text: 'Supporto community', included: true },
-      { text: 'Generazione file .pkt limitata (10 al mese)', included: true },
-      { text: 'Pubblicità dopo ogni generazione', included: true },
-      { text: 'Esportazione JSON', included: false },
-      { text: 'Analisi avanzata', included: false },
-      { text: 'API access', included: false },
-    ],
-    cta: 'Inizia Gratis',
-    popular: false,
-  },
   {
     id: 'professional',
     name: 'Professional',
@@ -57,7 +37,7 @@ export function Pricing() {
   const proPlanPeriod = isYearly ? 'annual' : 'month';
 
   return (
-    <section id="pricing" className="py-24 bg-slate-900">
+    <section id="pricing" className="py-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="text-center mb-12">
@@ -90,7 +70,7 @@ export function Pricing() {
         </div>
 
         {/* Pricing Cards */}
-        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        <div className="grid md:grid-cols-1 gap-8 max-w-xl mx-auto">
           {plans.map((plan) => (
             <div
               key={plan.id}
@@ -164,7 +144,7 @@ export function Pricing() {
                       </CheckoutButton>
                     ) : (
                       <Button
-                        className="w-full bg-cyan-500/70 text-white cursor-not-allowed"
+                        className="w-full bg-gray-300 text-black cursor-not-allowed"
                         disabled
                       >
                         Configura piano Pro

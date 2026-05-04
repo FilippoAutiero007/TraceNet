@@ -31,7 +31,7 @@ export const Footer: React.FC = () => {
   ];
 
   return (
-    <footer id="contact" className="bg-slate-950 border-t border-slate-800 py-20">
+    <footer id="contact" className="border-t border-slate-800 py-12">
       <div className="max-w-6xl mx-auto px-6">
         <div className="flex flex-col items-center justify-center gap-12">
           {/* NetTrace Brand */}

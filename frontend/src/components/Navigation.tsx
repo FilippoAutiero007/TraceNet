@@ -2,18 +2,16 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SignInButton, SignUpButton, UserButton, useAuth } from '@clerk/clerk-react';
 import { Button } from '@/components/ui/button';
-import { Network, Menu, X, Zap } from 'lucide-react';
+import { Network, Menu, X } from 'lucide-react';
 
 export function Navigation() {
   const { isSignedIn } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navLinks = [
-    { href: '/intro', label: 'Introduzione' },
     { href: '/features', label: 'Funzionalità' },
-    { href: '/pricing', label: 'Prezzi' },
-    { href: '/free', label: 'Gratis' },
-    { href: '/pro', label: 'Pro' },
+    { href: '/generator', label: 'Generatore' },
+    { href: '/analisi', label: 'Analisi' },
   ];
 
   return (
@@ -41,12 +39,6 @@ export function Navigation() {
 
           {/* Auth Buttons */}
           <div className="hidden md:flex items-center gap-4">
-            <Link to="/generator">
-              <Button className="bg-cyan-500 hover:bg-cyan-600 text-white font-semibold">
-                <Zap className="mr-2 h-4 w-4" />
-                Try Generator
-              </Button>
-            </Link>
             {isSignedIn ? (
               <UserButton afterSignOutUrl="/" />
             ) : (
@@ -57,7 +49,7 @@ export function Navigation() {
                   </Button>
                 </SignInButton>
                 <SignUpButton mode="modal">
-                  <Button variant="outline" className="border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-white">
+                  <Button variant="outline" className="border-cyan-500 text-black hover:bg-cyan-500 hover:text-white">
                     Registrati
                   </Button>
                 </SignUpButton>
@@ -89,12 +81,6 @@ export function Navigation() {
                 </Link>
               ))}
               <div className="flex flex-col gap-2 pt-4 border-t border-slate-800">
-                <Link to="/generator" onClick={() => setMobileMenuOpen(false)}>
-                  <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-semibold">
-                    <Zap className="mr-2 h-4 w-4" />
-                    Try Generator
-                  </Button>
-                </Link>
                 {isSignedIn ? (
                   <div className="px-2">
                     <UserButton afterSignOutUrl="/" />
