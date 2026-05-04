@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Activity, Zap, Brain } from 'lucide-react';
-import { SignUpButton } from '@clerk/clerk-react';
+import { ArrowRight, Activity, Zap, Brain, AlertTriangle } from 'lucide-react';
+
 import { ParticleEffect } from '@/components/ParticleEffect';
 
 export function Hero() {
@@ -127,17 +127,16 @@ export function Hero() {
 
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
-            <SignUpButton mode="modal">
-              <Button
-                size="lg"
-                className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg group"
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-              >
-                Inizia Gratuitamente
-                <ArrowRight className={`w-5 h-5 ml-2 transition-transform ${isHovered ? 'translate-x-1' : ''}`} />
-              </Button>
-            </SignUpButton>
+            <Button
+              size="lg"
+              className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg group"
+              onMouseEnter={() => setIsHovered(true)}
+              onMouseLeave={() => setIsHovered(false)}
+              onClick={() => navigate('/generator')}
+            >
+              Inizia Gratuitamente
+              <ArrowRight className={`w-5 h-5 ml-2 transition-transform ${isHovered ? 'translate-x-1' : ''}`} />
+            </Button>
           </div>
         </div>
 
@@ -172,9 +171,9 @@ export function Hero() {
         </div>
 
         {/* Non hai Cisco? Section */}
-        <div className="mt-20 text-center">
+        <div className="mt-60 text-center">
           <h2 className="text-2xl font-bold text-white mb-8">Non hai Cisco Packet Tracer?</h2>
-          <div className="max-w-2xl mx-auto p-8 rounded-2xl bg-slate-900/50 border border-slate-800">
+          <div className="max-w-4xl mx-auto p-12 rounded-2xl bg-slate-900/50 border border-slate-800">
             <p className="text-slate-300 mb-6">
               Per aprire i file .pkt generati da TraceNet, devi installare Cisco Packet Tracer.
               È disponibile gratuitamente per studenti e docenti.
@@ -182,23 +181,43 @@ export function Hero() {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button
                 size="lg"
-                className="bg-cyan-500 hover:bg-cyan-600 text-white"
-                onClick={() => window.open('https://www.netacad.com/cisco-packet-tracer', '_blank')}
+                variant="outline"
+                className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                onClick={() => window.open('https://www.netacad.com/resources/lab/cisco-packet-tracer-resources', '_blank')}
               >
                 Scarica Cisco Packet Tracer
               </Button>
               <Button
                 size="lg"
-                variant="outline"
-                className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
+                onClick={() => window.open('https://github.com/FilippoAutiero007/TraceNet/releases/download/1.0/Packet_Tracer822_0400_64bit_setup_signed.exe', '_blank')}
               >
-                Dove installarlo
+                Download Veloce
               </Button>
             </div>
-            <p className="text-slate-500 text-sm mt-4">
-              Dopo l'installazione, trova l'eseguibile in:<br />
-              <code className="text-slate-400">C:\Program Files\Cisco Packet Tracer\PacketTracer.exe</code>
+            <p className="text-slate-500 text-sm mt-4 flex items-center justify-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-yellow-500" />
+              TraceNet funziona solo con Cisco Packet Tracer versione 8.x.x
             </p>
+          </div>
+        </div>
+
+        {/* Non sai come usarlo? */}
+        <div className="mt-8 text-center">
+          <h2 className="text-2xl font-bold text-white mb-8">Non sai come usarlo?</h2>
+          <div className="max-w-4xl mx-auto p-12 rounded-2xl bg-slate-900/50 border border-slate-800">
+            <p className="text-slate-300 mb-6">
+              Scopri come utilizzare al meglio Cisco Packet Tracer per aprire e gestire i file .pkt generati da TraceNet.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Button
+                size="lg"
+                className="bg-cyan-500 hover:bg-cyan-600 text-white"
+                onClick={() => window.open('https://www.netacad.com/cisco-packet-tracer', '_blank')}
+              >
+                Impara subito
+              </Button>
+            </div>
           </div>
         </div>
       </div>

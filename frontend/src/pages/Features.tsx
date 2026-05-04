@@ -43,36 +43,7 @@ export function Features() {
       description: 'Intelligenza artificiale per identificare anomalie e pattern complessi.',
       details: ['Machine learning', 'Pattern recognition', 'Anomaly detection']
     },
-    {
-      icon: Lock,
-      title: 'Sicurezza Enterprise',
-      description: 'Crittografia end-to-end e conformità GDPR per la massima sicurezza.',
-      details: ['Encryption', 'GDPR compliant', 'Audit trails']
-    },
-    {
-      icon: BarChart3,
-      title: 'Dashboard Analytics',
-      description: 'Visualizzazioni avanzate e metriche dettagliate per analisi approfondite.',
-      details: ['Real-time charts', 'Custom metrics', 'Historical data']
-    },
-    {
-      icon: Code2,
-      title: 'API Rich & SDK',
-      description: 'API RESTful completa e SDK per integrazioni personalizzate.',
-      details: ['REST API', 'Webhooks', 'Client libraries']
-    },
-    {
-      icon: Users,
-      title: 'Collaborazione Team',
-      description: 'Lavora in team con condivisione di progetti e risultati in tempo reale.',
-      details: ['Team workspace', 'Real-time sync', 'Role-based access']
-    },
-    {
-      icon: Settings,
-      title: 'Configurazione Flessibile',
-      description: 'Personalizza ogni aspetto dell\'analisi secondo le tue esigenze.',
-      details: ['Custom rules', 'Flexible filters', 'Automation']
-    }
+    
   ];
 
   return (
