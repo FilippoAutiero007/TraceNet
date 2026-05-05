@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     
     # Rate Limiting
     max_requests_per_minute: str = Field(default="10/minute", description="Max PKT generation requests per minute")
+    free_weekly_generation_limit: int = Field(default=10, description="Weekly generation limit for free and anonymous users")
     
     # CORS
     allowed_origins: str = Field(

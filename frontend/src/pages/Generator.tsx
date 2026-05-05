@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
 import { DownloadResult } from '@/components/DownloadResult';
@@ -41,6 +42,7 @@ interface ParseResponse {
   intent: 'not_network' | 'incomplete' | 'complete';
   missing: string[];
   json: Record<string, unknown>;
+  error?: string | null;
 }
 
 interface DownloadResultData {
@@ -64,6 +66,7 @@ function isDownloadResultData(result: GenerateResponse | null): result is Downlo
 }
 
 export function Generator() {
+  const { getToken } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,9 +81,13 @@ export function Generator() {
     const apiBaseUrl = getApiBaseUrl();
 
     try {
+      const token = await getToken();
       const parseResponse = await fetch(`${apiBaseUrl}/api/parse-network-request`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           user_input: description,
           current_state: conversationState,
@@ -100,7 +107,8 @@ export function Generator() {
 
       if (parseData.intent === 'incomplete') {
         const missingList = parseData.missing.join(', ');
-        throw new Error(`Richiesta incompleta. Campi mancanti: ${missingList}`);
+        const parserStatus = parseData.error ? ` Stato parser: ${parseData.error}` : '';
+        throw new Error(`Richiesta incompleta. Campi mancanti: ${missingList}.${parserStatus}`);
       }
 
       setConversationState(parseData.json);
@@ -109,6 +117,7 @@ export function Generator() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(parseData.json),
       });

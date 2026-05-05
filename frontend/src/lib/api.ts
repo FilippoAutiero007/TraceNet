@@ -9,6 +9,7 @@ export interface ParseNetworkResponse {
   intent: 'not_network' | 'incomplete' | 'complete';
   missing: string[];
   json: Record<string, unknown>;
+  error?: string | null;
 }
 
 export interface PktAnalysisIssue {
@@ -61,31 +62,31 @@ function buildAuthHeaders(token?: string | null): HeadersInit | undefined {
 }
 
 export const apiClient = {
-  async parseNetworkRequest(userInput: string, currentState: Record<string, unknown> = {}) {
+  async parseNetworkRequest(userInput: string, currentState: Record<string, unknown> = {}, token?: string | null) {
     const response = await fetch(`${API_BASE_URL}/api/parse-network-request`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(buildAuthHeaders(token) || {}) },
       body: JSON.stringify({ user_input: userInput, current_state: currentState }),
     });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(`Parser API error: ${error.message || response.statusText}`);
+      throw new Error(`Parser API error: ${error.error || error.message || response.statusText}`);
     }
 
     return (await response.json()) as ParseNetworkResponse;
   },
 
-  async generateNetwork(normalizedPayload: Record<string, unknown>) {
+  async generateNetwork(normalizedPayload: Record<string, unknown>, token?: string | null) {
     const response = await fetch(`${API_BASE_URL}/api/generate-pkt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(buildAuthHeaders(token) || {}) },
       body: JSON.stringify(normalizedPayload),
     });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(`Generate API error: ${error.message || response.statusText}`);
+      throw new Error(`Generate API error: ${error.error || error.message || response.statusText}`);
     }
 
     return response.json();

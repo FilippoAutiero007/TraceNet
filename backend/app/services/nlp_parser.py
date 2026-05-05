@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -34,6 +35,11 @@ RAG_KNOWLEDGE_BASE = {
 NETWORK_KEYWORDS = {
     "rete", "network", "router", "switch", "pc", "vlan", "subnet", "routing", "ospf", "rip", "eigrp", "cidr"
 }
+NETWORK_PATTERNS = [
+    re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}\b"),
+    re.compile(r"\b(?:nat|dhcp|acl|dmz|gateway|backbone|wan|lan)\b", re.IGNORECASE),
+    re.compile(r"\b(?:static routing|router-on-a-stick|default route)\b", re.IGNORECASE),
+]
 
 class MistralResponseSchema(BaseModel):
     """Schema per validare la response di Mistral."""
@@ -133,7 +139,9 @@ def _validate_normalized_json(data: dict[str, Any]) -> tuple[list[str], dict[str
 
 def _is_network_related(user_input: str) -> bool:
     lowered = user_input.lower()
-    return any(keyword in lowered for keyword in NETWORK_KEYWORDS)
+    keyword_hits = sum(1 for keyword in NETWORK_KEYWORDS if keyword in lowered)
+    pattern_hits = sum(1 for pattern in NETWORK_PATTERNS if pattern.search(user_input))
+    return keyword_hits >= 1 or pattern_hits >= 1
 
 
 @retry(
@@ -220,4 +228,4 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
         logger.error("Parser failure: %s", exc, exc_info=True)
         if isinstance(exc, ParserServiceError):
             raise
-        raise ParserServiceError(f"Failed to parse network request: {str(exc)}") from exc
+        raise ParserServiceError("Failed to parse network request.") from exc

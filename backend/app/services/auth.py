@@ -10,6 +10,7 @@ import jwt
 from fastapi import HTTPException, Request
 
 from app.config import settings
+from app.utils.errors import api_error
 
 
 @dataclass
@@ -39,13 +40,16 @@ async def _get_jwks_keys() -> list[dict[str, Any]]:
         return _JWKS_CACHE["keys"]
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(settings.clerk_jwks_url)
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = await client.get(settings.clerk_jwks_url)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as exc:
+            raise api_error(503, "AUTH_PROVIDER_UNAVAILABLE", "Authentication service unavailable.") from exc
 
     keys = data.get("keys")
     if not isinstance(keys, list) or not keys:
-        raise HTTPException(status_code=503, detail="Clerk JWKS unavailable")
+        raise api_error(503, "AUTH_PROVIDER_UNAVAILABLE", "Authentication service unavailable.")
 
     _JWKS_CACHE["keys"] = keys
     _JWKS_CACHE["expires_at"] = now + 300
@@ -90,30 +94,30 @@ def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None
         return
     if origin and origin in configured:
         return
-    raise HTTPException(status_code=401, detail="Unauthorized Clerk token audience")
+    raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
 
 async def verify_clerk_session_token(request: Request) -> AuthContext:
     token = _parse_bearer_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise api_error(401, "AUTH_REQUIRED", "Authentication required.")
 
     try:
         header = jwt.get_unverified_header(token)
     except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid Clerk token header: {exc}") from exc
+        raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.") from exc
 
     if header.get("alg") != "RS256":
-        raise HTTPException(status_code=401, detail="Unsupported Clerk token algorithm")
+        raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
     kid = header.get("kid")
     if not kid:
-        raise HTTPException(status_code=401, detail="Missing Clerk token key id")
+        raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
     keys = await _get_jwks_keys()
     matching_key = next((key for key in keys if key.get("kid") == kid), None)
     if not matching_key:
-        raise HTTPException(status_code=401, detail="Unknown Clerk signing key")
+        raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
     public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(matching_key))
     try:
@@ -125,14 +129,14 @@ async def verify_clerk_session_token(request: Request) -> AuthContext:
             leeway=5,
         )
     except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid Clerk session token: {exc}") from exc
+        raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.") from exc
 
     _validate_authorized_party(claims, request)
 
     scope, plan_slug = _extract_plan(claims)
     user_id = str(claims.get("sub") or "").strip()
     if not user_id:
-        raise HTTPException(status_code=401, detail="Clerk token missing user id")
+        raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
     return AuthContext(
         user_id=user_id,
@@ -154,5 +158,5 @@ async def get_optional_auth_context(request: Request) -> Optional[AuthContext]:
 async def require_pro_user(request: Request) -> AuthContext:
     auth = await verify_clerk_session_token(request)
     if not auth.is_pro:
-        raise HTTPException(status_code=403, detail="Pro plan required")
+        raise api_error(403, "AUTH_PLAN_REQUIRED", "Pro plan required.")
     return auth

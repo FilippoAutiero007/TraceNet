@@ -94,6 +94,8 @@ class GenerateResponse(BaseModel):
     subnets: Optional[List[SubnetResult]] = None
     cli_script: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
+    request_id: Optional[str] = None
 
 
 class PktGenerateRequest(BaseModel):
@@ -311,6 +313,8 @@ class PktGenerateResponse(BaseModel):
     config_summary: Optional[Dict[str, Any]] = None
     subnets: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
+    request_id: Optional[str] = None
 
 
 class PktAnalysisIssue(BaseModel):
@@ -344,6 +348,8 @@ class PktAnalysisResponse(BaseModel):
     review: Optional[PktReviewResult] = None
     exercise_text: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
+    request_id: Optional[str] = None
 
 
 class UserCapabilitiesResponse(BaseModel):
@@ -353,3 +359,6 @@ class UserCapabilitiesResponse(BaseModel):
     plan_scope: Optional[Literal["u", "o"]] = None
     is_pro: bool = False
     can_use_pro_pkt_review: bool = False
+    weekly_generation_limit: Optional[int] = None
+    weekly_generation_used: int = 0
+    weekly_generation_remaining: Optional[int] = None

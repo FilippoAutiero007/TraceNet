@@ -10,17 +10,6 @@ Le voci già risolte sono state rimosse.
 
 ### High
 
-- **Heuristica `_is_network_related()` troppo banale**
-  - Usa solo `any(keyword in lowered ...)` in [`nlp_parser.py`](backend/app/services/nlp_parser.py).
-  - Richieste borderline possono essere classificate male prima del parser NLP vero.
-  - Fix: ampliare i pattern (es. regex per CIDR, keyword su routing/VLAN/NAT); valutare un piccolo punteggio euristico.
-
-- **Messaggio di errore parser degradato perso nel frontend**
-  - Il backend può restituire `error="NLP Service Unavailable: Mistral API Key missing on server."` in [`ParseNetworkResponse`](backend/app/services/nlp_parser.py).
-  - In [`Generator.tsx`](frontend/src/pages/Generator.tsx) quando `intent === "incomplete"` il frontend mostra solo i campi mancanti e scarta `parseData.error`.
-  - In ambienti senza chiave AI l'utente vede un errore parziale e non capisce che il parser NLP è disabilitato.
-  - Fix: includere `parseData.error` nel messaggio UI oppure mostrarlo separatamente come backend-status warning.
-
 ---
 
 ### Medium
@@ -71,16 +60,7 @@ Le voci già risolte sono state rimosse.
   - In ambienti mal configurati il bootstrap fallisce in modo poco chiaro.
   - Fix: validare la key prima di montare `ClerkProvider`; mostrare un errore esplicito in dev se assente.
 
----
 
-### Medium
-
-- **Bottone "Guarda la Demo" senza azione**
-  - In [`Hero.tsx`](frontend/src/sections/Hero.tsx) il bottone non ha onClick / navigazione.
-  - L'interfaccia promette un'azione che non esiste.
-  - Fix: collegare a una route di demo interna, un link esterno, o rimuovere finché non esiste una demo reale.
-
----
 
 ### Low
 
@@ -102,11 +82,6 @@ Le voci già risolte sono state rimosse.
   - Candidati: `/api/parse-network-request`, `/api/generate-pkt`, `/api/generate-pkt-manual`.
   - Middleware di rate limiting per IP e/o per utente autenticato, parametrizzato per piano (free/pro).
 
-- **Separare errori client-facing dai dettagli interni**
-  - In più punti il backend ritorna ancora `str(exc)` nel payload.
-  - Introdurre un modello uniforme di error response (codice errore + messaggio generico + request id).
-  - Loggare i dettagli solo lato server, mai nel payload.
-
 - **Validazione più rigida dei campi `extra="allow"`**
   - Aree candidate: NAT, ACL, VLAN.
   - Introdurre whitelist di chiavi ammesse; rifiutare esplicitamente input con chiavi sconosciute.
@@ -123,17 +98,11 @@ Le voci già risolte sono state rimosse.
   - Job periodico che elimina file più vecchi di N ore/giorni.
   - Possibile differenziazione retention free vs pro.
 
-- **Log di sicurezza con request id e classificazione errori**
-  - Includere sempre `request_id` nei log e nelle risposte di errore.
-  - Classificare errori (es. `SEC_RATE_LIMIT`, `SEC_PAYLOAD_TOO_LARGE`, `SEC_INVALID_SCHEMA`).
-
 - **Esecuzione PKT in processo / sandbox separata**
   - Valutare subprocess isolato, container/worker separato o coda di job con time limit e risorse limitate.
   - Ridurre l'impatto di input malevoli o bug del generatore sul processo API principale.
 
-- **Autenticazione Clerk e quota generazione reti**
-  - Per ogni richiesta al webservice, inviare il token utente Clerk (bearer / session token).
-  - Backend: validare il token con le chiavi pubbliche Clerk, estrarre l'id utente e il piano (free/pro).
-  - Tenere un contatore per utente e settimana (`user_id`, `week`, `generated_count`).
-  - Utenti free: limite di 10 reti generate per settimana; superato il limite, rispondere con 402/429 + messaggio chiaro.
-  - Utenti pro: nessun limite (o limite superiore configurabile).
+- **Quota generazione settimanale solo in memoria**
+  - Il contatore quota attuale vive nel processo API e non sopravvive ai riavvii.
+  - In deploy multi-replica ogni istanza mantiene contatori separati e la quota può essere aggirata.
+  - Fix: spostare il contatore su storage condiviso (Redis/Postgres) con chiave `user_id + week`.

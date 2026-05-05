@@ -74,3 +74,13 @@ async def test_parse_network_request_does_not_retry_deterministic_parser_errors(
         await parse_network_request("create a network with router", {})
 
     assert attempts["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_network_request_detects_network_context_from_cidr_and_nat(monkeypatch):
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+
+    response = await parse_network_request("Configura 10.0.0.0/24 con NAT e gateway centrale", {})
+
+    assert response.intent == ParseIntent.INCOMPLETE
+    assert "base_network" in response.missing

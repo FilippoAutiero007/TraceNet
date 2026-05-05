@@ -1,5 +1,6 @@
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app.models.schemas import DeviceConfig, NormalizedNetworkRequest, SubnetRequest
 from app.routers.generate import _validate_filename, _default_subnet_for_base, generate_network
@@ -78,6 +79,7 @@ async def test_generate_network_keeps_requested_base_prefix_when_subnets_are_omi
     base_network,
     expected_network,
 ):
+    fake_request = Request({"type": "http", "headers": [], "method": "POST", "path": "/api/generate"})
     response = await generate_network(
         NormalizedNetworkRequest(
             base_network=base_network,
@@ -86,7 +88,8 @@ async def test_generate_network_keeps_requested_base_prefix_when_subnets_are_omi
             pcs=5,
             routing_protocol="STATIC",
             subnets=[],
-        )
+        ),
+        fake_request,
     )
 
     assert response.success is True

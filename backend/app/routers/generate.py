@@ -5,7 +5,7 @@ import logging
 import ipaddress
 from threading import Lock
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
@@ -24,12 +24,14 @@ from app.models.schemas import (
     DeviceConfig,
 )
 from app.services.auth import AuthContext, get_optional_auth_context, require_pro_user
+from app.services.generation_quota import consume_generation_quota, get_generation_quota_status
 from app.services.nlp_parser import ParserServiceError, parse_network_request
 from app.services.pkt_analyzer import analyze_pkt_bytes
 from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
 from app.services.pkt_review import review_pkt_analysis
+from app.utils.errors import api_error, get_request_id
 
 _pkt_generation_lock = Lock()
 logger = logging.getLogger(__name__)
@@ -81,10 +83,10 @@ def _validate_filename(filename: str) -> str:
     import re
 
     if not re.match(r"^[\w\-\.]+$", filename):
-        raise HTTPException(status_code=400, detail="Invalid filename")
+        raise api_error(400, "SEC_INVALID_FILENAME", "Invalid filename.")
 
     if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
+        raise api_error(400, "SEC_INVALID_FILENAME", "Invalid filename.")
 
     return filename
 
@@ -96,11 +98,11 @@ async def parse_network_endpoint(request: ParseNetworkRequest):
         return await parse_network_request(request.user_input, request.current_state)
     except ParserServiceError as exc:
         logger.error("Parse network request failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Parser internal error: {exc}") from exc
+        raise api_error(502, "PARSER_BACKEND_FAILURE", "Parser service unavailable.") from exc
 
 
 @router.post("/generate", response_model=GenerateResponse)
-async def generate_network(request: NormalizedNetworkRequest):
+async def generate_network(request: NormalizedNetworkRequest, http_request: Request):
     """Generate CLI configuration from normalized JSON only."""
     try:
         # Ensure protocol normalization stays consistent with schema expectations.
@@ -124,19 +126,34 @@ async def generate_network(request: NormalizedNetworkRequest):
             cli_script=cli_script,
         )
     except ValueError as exc:
-        error_msg = f"Validation error: {exc}"
-        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
-        return GenerateResponse(success=False, error=error_msg)
+        logger.warning("Network generation validation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        return GenerateResponse(
+            success=False,
+            error="Invalid network generation request.",
+            error_code="SEC_INVALID_SCHEMA",
+            request_id=get_request_id(http_request),
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
-        error_msg = f"Generation failed: {exc}"
-        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
-        return GenerateResponse(success=False, error=error_msg)
+        logger.error("Network generation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        return GenerateResponse(
+            success=False,
+            error="Network generation failed.",
+            error_code="GENERATION_FAILED",
+            request_id=get_request_id(http_request),
+        )
 
 
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
-async def generate_pkt_file(request: NormalizedNetworkRequest):
+async def generate_pkt_file(
+    request: NormalizedNetworkRequest,
+    http_request: Request,
+    auth: AuthContext | None = Depends(get_optional_auth_context),
+):
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
     try:
+        consume_generation_quota(auth, http_request)
         subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
         protocol_value = "static" if request.routing_protocol == "STATIC" else request.routing_protocol
 
@@ -150,9 +167,13 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
-            error_msg = "Server busy: PKT generation is already running. Please retry in a few seconds."
             logger.warning("PKT generation lock timeout after 30s")
-            return PktGenerateResponse(success=False, error=error_msg)
+            return PktGenerateResponse(
+                success=False,
+                error="Server busy. Please retry in a few seconds.",
+                error_code="GENERATION_BUSY",
+                request_id=get_request_id(http_request),
+            )
         
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
@@ -190,20 +211,35 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
                 for s in subnets
             ],
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
-        error_msg = f"Validation error: {exc}"
-        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
-        return PktGenerateResponse(success=False, error=error_msg)
+        logger.warning("PKT generation validation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        return PktGenerateResponse(
+            success=False,
+            error="Invalid PKT generation request.",
+            error_code="SEC_INVALID_SCHEMA",
+            request_id=get_request_id(http_request),
+        )
     except Exception as exc:
-        error_msg = f"PKT generation failed: {exc}"
-        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
-        return PktGenerateResponse(success=False, error=error_msg)
+        logger.error("PKT generation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        return PktGenerateResponse(
+            success=False,
+            error="PKT generation failed.",
+            error_code="GENERATION_FAILED",
+            request_id=get_request_id(http_request),
+        )
 
 
 @router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
-async def generate_pkt_file_manual(request: ManualNetworkRequest):
+async def generate_pkt_file_manual(
+    request: ManualNetworkRequest,
+    http_request: Request,
+    auth: AuthContext | None = Depends(get_optional_auth_context),
+):
     """Generate Cisco Packet Tracer .pkt file from structured parameters."""
     try:
+        consume_generation_quota(auth, http_request)
         subnets = calculate_vlsm(request.base_network, request.subnets)
 
         network_config_dict = {
@@ -230,9 +266,13 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
-            error_msg = "Server busy: PKT generation is already running. Please retry in a few seconds."
             logger.warning("Manual PKT generation lock timeout after 30s")
-            return ManualPktGenerateResponse(success=False, error=error_msg)
+            return ManualPktGenerateResponse(
+                success=False,
+                error="Server busy. Please retry in a few seconds.",
+                error_code="GENERATION_BUSY",
+                request_id=get_request_id(http_request),
+            )
         
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
@@ -271,14 +311,24 @@ async def generate_pkt_file_manual(request: ManualNetworkRequest):
             ],
             encoding_method=result["encoding_used"],
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
-        error_msg = f"Validation error: {exc}"
-        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
-        return ManualPktGenerateResponse(success=False, error=error_msg)
+        logger.warning("Manual PKT generation validation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        return ManualPktGenerateResponse(
+            success=False,
+            error="Invalid PKT generation request.",
+            error_code="SEC_INVALID_SCHEMA",
+            request_id=get_request_id(http_request),
+        )
     except Exception as exc:
-        error_msg = f"PKT generation failed: {str(exc)}"
-        logger.error(error_msg, extra={"request": request.model_dump()}, exc_info=True)
-        return ManualPktGenerateResponse(success=False, error=error_msg)
+        logger.error("Manual PKT generation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        return ManualPktGenerateResponse(
+            success=False,
+            error="PKT generation failed.",
+            error_code="GENERATION_FAILED",
+            request_id=get_request_id(http_request),
+        )
 
 
 @router.post("/analyze-pkt", response_model=PktAnalysisResponse)
@@ -290,11 +340,11 @@ async def analyze_pkt_file(
     """Analyze an uploaded Packet Tracer file and return a Pro diagnostic report."""
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
-        raise HTTPException(status_code=400, detail="Only .pkt files are supported")
+        raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
     pkt_data = await file.read()
     if not pkt_data:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
     analysis = analyze_pkt_bytes(pkt_data, filename=filename)
     analysis.exercise_text = exercise_text
@@ -305,11 +355,20 @@ async def analyze_pkt_file(
 
 @router.get("/me/capabilities", response_model=UserCapabilitiesResponse)
 async def get_user_capabilities(
+    request: Request,
     auth: AuthContext | None = Depends(get_optional_auth_context),
 ):
     """Return the authenticated user's current feature capabilities."""
+    quota = get_generation_quota_status(auth, request)
     if auth is None:
-        return UserCapabilitiesResponse(is_authenticated=False, is_pro=False, can_use_pro_pkt_review=False)
+        return UserCapabilitiesResponse(
+            is_authenticated=False,
+            is_pro=False,
+            can_use_pro_pkt_review=False,
+            weekly_generation_limit=quota.limit,
+            weekly_generation_used=quota.used,
+            weekly_generation_remaining=quota.remaining,
+        )
 
     return UserCapabilitiesResponse(
         is_authenticated=True,
@@ -318,6 +377,9 @@ async def get_user_capabilities(
         plan_scope=auth.plan_scope if auth.plan_scope in {"u", "o"} else None,
         is_pro=auth.is_pro,
         can_use_pro_pkt_review=auth.is_pro,
+        weekly_generation_limit=quota.limit,
+        weekly_generation_used=quota.used,
+        weekly_generation_remaining=quota.remaining,
     )
 
 
@@ -333,12 +395,12 @@ async def download_file(filename: str):
     
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
-            raise HTTPException(status_code=403, detail="Access denied")
+            raise api_error(403, "SEC_ACCESS_DENIED", "Access denied.")
     except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise api_error(403, "SEC_ACCESS_DENIED", "Access denied.")
     
     if not filepath.exists():
-        raise HTTPException(status_code=404, detail="File not found")
+        raise api_error(404, "FILE_NOT_FOUND", "File not found.")
 
     if filename.endswith(".pkt"):
         media_type = "application/gzip"

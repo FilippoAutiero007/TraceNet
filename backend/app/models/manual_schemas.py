@@ -91,6 +91,8 @@ class ManualPktGenerateResponse(BaseModel):
     config_summary: Optional[dict] = None
     subnets: Optional[List[dict]] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
+    request_id: Optional[str] = None
     encoding_method: Optional[str] = Field(
         None,
         description="Encoding method used (external_pka2xml or legacy_xor_fallback)"
