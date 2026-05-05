@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import { FileUp, CheckCircle, XCircle, AlertCircle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { useAuth } from '@clerk/clerk-react';
 import { Footer } from '@/sections/Footer';
 
 export function Analisi() {
   const { isSignedIn } = useAuth();
-  const [file, setFile] = useState<File | null>(null);
   const [exerciseText, setExerciseText] = useState('');
 
   return (

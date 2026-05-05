@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useAuth } from '@clerk/clerk-react';
-import { apiClient, getApiBaseUrl } from '@/lib/api';
+import { useState } from 'react';
+import { getApiBaseUrl } from '@/lib/api';
 import { NetworkInput } from '@/components/NetworkInput';
 import { DownloadResult } from '@/components/DownloadResult';
 import { SEOHead } from '@/components/SEOHead';
@@ -8,8 +7,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, CheckCircle2, FileWarning, Lock, Sparkles } from 'lucide-react';
-import type { PktAnalysisResponse, UserCapabilitiesResponse } from '@/lib/api';
+import { AlertCircle, FileWarning } from 'lucide-react';
+import type { PktAnalysisResponse } from '@/lib/api';
 import { Footer } from '@/sections/Footer';
 
 interface SubnetInfo {
@@ -65,44 +64,11 @@ function isDownloadResultData(result: GenerateResponse | null): result is Downlo
 }
 
 export function Generator() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [conversationState, setConversationState] = useState<Record<string, unknown>>({});
-  const [analysisResult, setAnalysisResult] = useState<PktAnalysisResponse | null>(null);
-  const [capabilities, setCapabilities] = useState<UserCapabilitiesResponse | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadCapabilities = async () => {
-      if (!isLoaded) {
-        return;
-      }
-
-      try {
-        const token = isSignedIn ? await getToken() : null;
-        const response = await apiClient.getUserCapabilities(token);
-        if (!cancelled) {
-          setCapabilities(response);
-        }
-      } catch {
-        if (!cancelled) {
-          setCapabilities({
-            is_authenticated: Boolean(isSignedIn),
-            is_pro: false,
-            can_use_pro_pkt_review: false,
-          });
-        }
-      }
-    };
-
-    void loadCapabilities();
-    return () => {
-      cancelled = true;
-    };
-  }, [getToken, isLoaded, isSignedIn]);
+  const [analysisResult] = useState<PktAnalysisResponse | null>(null);
 
   const handleGenerate = async (description: string) => {
     setIsGenerating(true);

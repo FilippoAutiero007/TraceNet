@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Shield, Zap, Activity, Globe, Database, Cpu, Lock, BarChart3, Code2, Users, Settings } from 'lucide-react';
+import { ArrowRight, Shield, Zap, Activity, Globe, Database, Cpu } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Footer } from '@/sections/Footer';
 
