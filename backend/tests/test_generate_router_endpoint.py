@@ -89,6 +89,42 @@ def test_generate_pkt_manual_forwards_nat_to_pkt_generation(monkeypatch):
     }
 
 
+def test_generate_pkt_uses_normalized_protocol_and_single_server_services_payload(monkeypatch):
+    captured = {}
+
+    def _fake_save_pkt_file(subnets, config, output_dir):
+        captured["config"] = config
+        return {
+            "success": True,
+            "pkt_path": "/tmp/tracenet/fake.pkt",
+            "xml_path": "/tmp/tracenet/fake.xml",
+            "encoding_used": "template_based",
+            "file_size": 123,
+        }
+
+    monkeypatch.setattr("app.routers.generate.save_pkt_file", _fake_save_pkt_file)
+
+    response = client.post(
+        "/api/generate-pkt",
+        json={
+            "base_network": "10.0.0.0/24",
+            "routers": 1,
+            "switches": 1,
+            "pcs": 5,
+            "routing_protocol": "STATIC",
+            "server_services": ["dns", "http"],
+            "subnets": [{"name": "LAN", "required_hosts": 20}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert captured["config"]["routing_protocol"] == "static"
+    assert captured["config"]["server_services"] == ["dns", "http"]
+    assert payload["config_summary"]["routing_protocol"] == "static"
+
+
 def test_analyze_pkt_endpoint_returns_diagnostic_report():
     app.dependency_overrides[require_pro_user] = lambda: AuthContext(
         user_id="user_123",

@@ -1,7 +1,7 @@
 import pytest
 
 from app.models.schemas import ParseIntent
-from app.services.nlp_parser import parse_network_request
+from app.services.nlp_parser import ParserServiceError, parse_network_request
 
 
 @pytest.mark.asyncio
@@ -39,3 +39,38 @@ async def test_parse_network_request_complete_from_state(monkeypatch):
 
     assert response.intent == ParseIntent.COMPLETE
     assert response.json_payload["routing_protocol"] == "STATIC"
+
+
+@pytest.mark.asyncio
+async def test_parse_network_request_does_not_retry_deterministic_parser_errors(monkeypatch):
+    attempts = {"count": 0}
+
+    class _FakeChat:
+        def complete(self, **kwargs):
+            attempts["count"] += 1
+            return type(
+                "FakeResponse",
+                (),
+                {
+                    "choices": [
+                        type(
+                            "FakeChoice",
+                            (),
+                            {"message": type("FakeMessage", (), {"content": '{"intent": "complete", "json": '})()},
+                        )()
+                    ]
+                },
+            )()
+
+    class _FakeMistral:
+        def __init__(self, api_key):
+            self.chat = _FakeChat()
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    monkeypatch.setattr("app.services.nlp_parser.Mistral", _FakeMistral)
+    monkeypatch.setattr("app.services.nlp_parser.retrieve_relevant_documents", lambda *args, **kwargs: [])
+
+    with pytest.raises(ParserServiceError, match="invalid or malformed JSON"):
+        await parse_network_request("create a network with router", {})
+
+    assert attempts["count"] == 1

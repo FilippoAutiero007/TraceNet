@@ -59,6 +59,12 @@ def test_default_subnet_for_base_uses_full_base_network_capacity():
     assert subnet.required_hosts == 65534
 
 
+@pytest.mark.parametrize("base_network", ["192.168.1.0/31", "192.168.1.1/32"])
+def test_default_subnet_for_base_rejects_networks_too_small_for_auto_lan(base_network):
+    with pytest.raises(ValueError, match="too small to auto-create a default LAN subnet"):
+        _default_subnet_for_base(base_network)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("base_network", "expected_network"),

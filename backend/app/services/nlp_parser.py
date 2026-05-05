@@ -137,7 +137,7 @@ def _is_network_related(user_input: str) -> bool:
 
 
 @retry(
-    retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException, Exception)),
+    retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     reraise=True,

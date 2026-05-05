@@ -10,34 +10,20 @@ Le voci già risolte sono state rimosse.
 
 ### High
 
-- **Retry del parser troppo aggressivo**
-  - Il decoratore `@retry` in [`nlp_parser.py`](backend/app/services/nlp_parser.py) include `Exception`, quindi intercetta anche errori deterministici già mappati su `ParserServiceError`.
-  - Errori non recuperabili vengono ritentati tre volte, rallentando la risposta e rendendo meno chiara la diagnosi.
-  - Fix: restringere le eccezioni ritentabili (es. errori di rete / timeout / rate limit del provider AI); escludere esplicitamente `ParserServiceError`.
-
-- **Gestione subnet troppo piccole in `_default_subnet_for_base()`**
-  - In [`generate.py`](backend/app/routers/generate.py) si usa `max(1, num_addresses - 2)`. In [`subnet_calculator.py`](backend/app/services/subnet_calculator.py) la VLSM richiede comunque almeno 4 indirizzi allocabili.
-  - Input formalmente validi (es. `/31`, `/32`) possono fallire più avanti con errori poco espliciti.
-  - Fix: validare subito la rete base e rifiutare con messaggio chiaro se non c'è spazio sufficiente. Tutti i prefix da `/1` a `/32` restano ammessi; il rifiuto scatta solo quando non c'è spazio per le subnet richieste.
-
-- **`/generate-pkt` costruisce `network_config_dict` con chiavi duplicate e summary incoerente**
-  - In [`generate.py`](backend/app/routers/generate.py) `server_services` è definito due volte nello stesso dict.
-  - `config_summary.routing_protocol` usa `request.routing_protocol`, mentre la pipeline interna usa `protocol_value` normalizzato.
-  - Fix: rimuovere la chiave duplicata; allineare il summary a `protocol_value`.
-
-- **Flusso manuale manca il campo `nat`**
-  - [`ManualNetworkRequest`](backend/app/models/manual_schemas.py) non include `nat`, mentre il flusso automatico lo passa a [`generate.py`](backend/app/routers/generate.py).
-  - Le due API destinate a generare PKT equivalenti hanno capacità diverse.
-  - Fix: aggiungere `nat` allo schema manuale e allineare la semantica tra i due flussi.
-
----
-
-### Medium
-
 - **Heuristica `_is_network_related()` troppo banale**
   - Usa solo `any(keyword in lowered ...)` in [`nlp_parser.py`](backend/app/services/nlp_parser.py).
   - Richieste borderline possono essere classificate male prima del parser NLP vero.
   - Fix: ampliare i pattern (es. regex per CIDR, keyword su routing/VLAN/NAT); valutare un piccolo punteggio euristico.
+
+- **Messaggio di errore parser degradato perso nel frontend**
+  - Il backend può restituire `error="NLP Service Unavailable: Mistral API Key missing on server."` in [`ParseNetworkResponse`](backend/app/services/nlp_parser.py).
+  - In [`Generator.tsx`](frontend/src/pages/Generator.tsx) quando `intent === "incomplete"` il frontend mostra solo i campi mancanti e scarta `parseData.error`.
+  - In ambienti senza chiave AI l'utente vede un errore parziale e non capisce che il parser NLP è disabilitato.
+  - Fix: includere `parseData.error` nel messaggio UI oppure mostrarlo separatamente come backend-status warning.
+
+---
+
+### Medium
 
 - **Test di integrazione skip-friendly invece di gate duro**
   - [`test_pkt_generator_integration.py`](backend/tests/test_pkt_generator_integration.py) e [`test_layout.py`](backend/tests/test_layout.py) saltano se mancano template `.pkt` in `backend/templates/`.

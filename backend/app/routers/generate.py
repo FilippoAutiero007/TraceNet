@@ -39,8 +39,41 @@ router = APIRouter(tags=["generate"])
 def _default_subnet_for_base(base_network: str) -> SubnetRequest:
     """Use the full base network when no explicit subnets are provided."""
     net = ipaddress.ip_network(base_network, strict=False)
+    if net.num_addresses < 4:
+        raise ValueError(
+            f"Base network {base_network} is too small to auto-create a default LAN subnet. "
+            "Use a network with at least 4 addresses (/30 or larger)."
+        )
     usable_hosts = max(1, int(net.num_addresses) - 2)
     return SubnetRequest(name="LAN", required_hosts=usable_hosts)
+
+
+def _build_pkt_network_config_dict(
+    request: NormalizedNetworkRequest,
+    subnets_input: list[SubnetRequest],
+    protocol_value: str,
+) -> dict:
+    return {
+        "base_network": request.base_network,
+        "subnets": [s.model_dump() for s in subnets_input],
+        "devices": {
+            "routers": request.routers,
+            "switches": request.switches,
+            "pcs": request.pcs,
+            "servers": getattr(request, "servers", 0),
+        },
+        "routing_protocol": protocol_value,
+        "dhcp_from_router": getattr(request, "dhcp_from_router", False),
+        "dhcp_dns": getattr(request, "dhcp_dns", None),
+        "server_services": request.server_services or [],
+        "servers_config": [s.model_dump() for s in request.servers_config] if request.servers_config else [],
+        "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
+        "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
+        "acl": [a.model_dump() for a in getattr(request, "acl", []) or []],
+        "XML_VERSION": "8.2.2.0400",
+        "topology": request.topology.model_dump() if request.topology else None,
+        "dns_records": [],
+    }
 
 
 def _validate_filename(filename: str) -> str:
@@ -107,23 +140,7 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
         subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
         protocol_value = "static" if request.routing_protocol == "STATIC" else request.routing_protocol
 
-        network_config_dict = {
-            "base_network": request.base_network,
-            "subnets": [s.model_dump() for s in subnets_input],
-            "devices": {"routers": request.routers, "switches": request.switches, "pcs": request.pcs, "servers": getattr(request, "servers", 0)},
-            "routing_protocol": protocol_value,
-            "dhcp_from_router": getattr(request, "dhcp_from_router", False),
-            "dhcp_dns": getattr(request, "dhcp_dns", None),
-            "server_services": getattr(request, "server_services", []) or [],
-            "servers_config": [s.model_dump() for s in request.servers_config] if request.servers_config else [],
-            "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
-            "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
-            "acl": [a.model_dump() for a in getattr(request, "acl", []) or []],
-            "XML_VERSION": "8.2.2.0400",
-            "topology": request.topology.model_dump() if request.topology else None,
-            "dns_records": [],
-            "server_services": request.server_services or [],
-        }
+        network_config_dict = _build_pkt_network_config_dict(request, subnets_input, protocol_value)
 
         subnets = calculate_vlsm(request.base_network, subnets_input)
 
@@ -161,7 +178,7 @@ async def generate_pkt_file(request: NormalizedNetworkRequest):
                 "routers": request.routers,
                 "switches": request.switches,
                 "pcs": request.pcs,
-                "routing_protocol": request.routing_protocol,
+                "routing_protocol": protocol_value,
             },
             subnets=[
                 {
