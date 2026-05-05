@@ -45,12 +45,12 @@ export function Navigation() {
             ) : (
               <>
                 <SignInButton mode="modal">
-                  <Button variant="ghost" className="text-slate-300 hover:text-white">
+                  <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
                     Accedi
                   </Button>
                 </SignInButton>
                 <SignUpButton mode="modal">
-                  <Button variant="outline" className="border-cyan-500 text-black hover:bg-cyan-500 hover:text-white">
+                  <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
                     Registrati
                   </Button>
                 </SignUpButton>
@@ -89,12 +89,12 @@ export function Navigation() {
                 ) : (
                   <>
                     <SignInButton mode="modal">
-                      <Button variant="ghost" className="w-full justify-start text-slate-300">
+                      <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-white justify-start">
                         Accedi
                       </Button>
                     </SignInButton>
                     <SignUpButton mode="modal">
-                      <Button variant="outline" className="w-full border-cyan-500 text-cyan-500">
+                      <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-white">
                         Registrati
                       </Button>
                     </SignUpButton>
