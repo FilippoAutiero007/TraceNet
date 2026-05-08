@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, FileWarning } from 'lucide-react';
+import { AlertCircle, FileWarning, HelpCircle, ArrowRight } from 'lucide-react';
 import type { PktAnalysisResponse } from '@/lib/api';
 import { Footer } from '@/sections/Footer';
 
@@ -41,6 +41,7 @@ interface GenerateResponse {
 interface ParseResponse {
   intent: 'not_network' | 'incomplete' | 'complete';
   missing: string[];
+  defaults_applied: boolean;
   json: Record<string, unknown>;
   error?: string | null;
 }
@@ -71,12 +72,18 @@ export function Generator() {
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [conversationState, setConversationState] = useState<Record<string, unknown>>({});
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [lastInput, setLastInput] = useState('');
   const [analysisResult] = useState<PktAnalysisResponse | null>(null);
 
-  const handleGenerate = async (description: string) => {
+  const handleGenerate = async (description: string, useDefaults: boolean = false) => {
     setIsGenerating(true);
     setError(null);
-    setResult(null);
+    if (!useDefaults) {
+        setResult(null);
+        setMissingFields([]);
+    }
+    setLastInput(description);
 
     const apiBaseUrl = getApiBaseUrl();
 
@@ -91,6 +98,7 @@ export function Generator() {
         body: JSON.stringify({
           user_input: description,
           current_state: conversationState,
+          use_defaults: useDefaults,
         }),
       });
 
@@ -105,13 +113,15 @@ export function Generator() {
         throw new Error('La richiesta non sembra relativa alla generazione di una rete.');
       }
 
+      setConversationState(parseData.json);
+
       if (parseData.intent === 'incomplete') {
-        const missingList = parseData.missing.join(', ');
-        const parserStatus = parseData.error ? ` Stato parser: ${parseData.error}` : '';
-        throw new Error(`Richiesta incompleta. Campi mancanti: ${missingList}.${parserStatus}`);
+        setMissingFields(parseData.missing);
+        return;
       }
 
-      setConversationState(parseData.json);
+      // If we reach here, intent is complete
+      setMissingFields([]);
 
       const generationResponse = await fetch(`${apiBaseUrl}/api/generate-pkt`, {
         method: 'POST',
@@ -154,6 +164,20 @@ export function Generator() {
   const handleRetry = () => {
     setError(null);
     setResult(null);
+    setMissingFields([]);
+    setConversationState({});
+  };
+
+  const handleTraceNetDecide = () => {
+    handleGenerate(lastInput, true);
+  };
+
+  const fieldLabels: Record<string, string> = {
+    base_network: 'Base Network (es. 192.168.1.0/24)',
+    routers: 'Numero di Router',
+    switches: 'Numero di Switch',
+    pcs: 'Numero di PC',
+    routing_protocol: 'Protocollo di Routing (STATIC, RIP, OSPF, EIGRP)',
   };
 
   return (
@@ -178,6 +202,43 @@ export function Generator() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
               <NetworkInput onGenerate={handleGenerate} isGenerating={isGenerating} />
+
+              {missingFields.length > 0 && !error && (
+                <Card className="border-cyan-800 bg-slate-900 shadow-lg shadow-cyan-500/10">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-cyan-400">
+                      <HelpCircle className="h-5 w-5" />
+                      Informazioni Mancanti
+                    </CardTitle>
+                    <CardDescription>
+                      Ho bisogno di qualche dettaglio in più per generare la tua rete.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      {missingFields.map((field) => (
+                        <div key={field} className="flex items-center gap-2 text-slate-300 text-sm">
+                          <ArrowRight className="h-4 w-4 text-cyan-500" />
+                          <span>{fieldLabels[field] || field}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-4 flex flex-col gap-3">
+                      <p className="text-xs text-slate-500 italic">
+                        Puoi rispondere scrivendo i valori sopra nel campo di testo principale.
+                      </p>
+                      <Button
+                        onClick={handleTraceNetDecide}
+                        disabled={isGenerating}
+                        className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 font-medium"
+                      >
+                        Let TraceNet decide (Default values)
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {error && (
                 <Alert variant="destructive" className="bg-red-950 border-red-900">
