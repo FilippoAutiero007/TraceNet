@@ -95,7 +95,7 @@ def _validate_filename(filename: str) -> str:
 async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
     try:
-        return await parse_network_request(request.user_input, request.current_state)
+        return await parse_network_request(request.user_input, request.current_state, request.use_defaults)
     except ParserServiceError as exc:
         logger.error("Parse network request failed: %s", exc, exc_info=True)
         raise api_error(502, "PARSER_BACKEND_FAILURE", "Parser service unavailable.") from exc

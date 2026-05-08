@@ -13,6 +13,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.models.schemas import ParseIntent, ParseNetworkResponse
 from app.services.rag_knowledge import NETWORK_PARSER_DOCUMENTS, retrieve_relevant_documents
+from app.utils.cache import response_cache
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ Rules:
 - If network-related but required fields are missing -> intent=incomplete and missing must list exact missing required fields.
 - If complete -> intent=complete and json must contain normalized values.
 - Normalize routing synonyms (e.g. statico/static routing -> STATIC).
-- Do NOT invent missing values.
+- DO NOT hallucinate missing values. If a value is missing, it must be listed in "missing".
 - Do NOT calculate subnets, masks, or network math.
 - Output JSON only. No markdown, no explanations.
 """
@@ -150,26 +151,58 @@ def _is_network_related(user_input: str) -> bool:
     wait=wait_exponential(multiplier=1, min=1, max=8),
     reraise=True,
 )
-async def parse_network_request(user_input: str, current_state: dict[str, Any]) -> ParseNetworkResponse:
+async def parse_network_request(
+    user_input: str,
+    current_state: dict[str, Any],
+    use_defaults: bool = False
+) -> ParseNetworkResponse:
     """Parse user text into strict normalized JSON intent contract."""
     if not _is_network_related(user_input):
         return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
+
+    # Performance optimization: cache check
+    cache_key = f"{user_input}:{json.dumps(current_state, sort_keys=True)}"
+    cached = response_cache.get(cache_key)
+    if cached:
+        logger.info("Cache hit for network request")
+        try:
+            return ParseNetworkResponse.model_validate(cached)
+        except Exception:
+            logger.warning("Failed to validate cached response, falling back to LLM")
 
     api_key = os.environ.get("MISTRAL_API_KEY")
     if not api_key:
         logger.warning("MISTRAL_API_KEY not found. NLP parsing is disabled.")
         merged = _merge_with_state({}, current_state)
         missing, normalized = _validate_normalized_json(merged)
+
+        defaults_applied = False
+        if use_defaults:
+            if "routers" in missing:
+                normalized["routers"] = 1
+                missing.remove("routers")
+                defaults_applied = True
+            if "switches" in missing:
+                normalized["switches"] = 1
+                missing.remove("switches")
+                defaults_applied = True
+            if "pcs" in missing:
+                normalized["pcs"] = 2
+                missing.remove("pcs")
+                defaults_applied = True
+
         if missing:
             return ParseNetworkResponse(
                 intent=ParseIntent.INCOMPLETE,
                 missing=missing,
-                json={},
+                defaults_applied=defaults_applied,
+                json=normalized,
                 error="NLP Service Unavailable: Mistral API Key missing on server.",
             )
         return ParseNetworkResponse(
             intent=ParseIntent.COMPLETE,
             missing=[],
+            defaults_applied=defaults_applied,
             json=normalized,
             error="NLP Service Unavailable: Mistral API Key missing on server.",
         )
@@ -216,13 +249,31 @@ async def parse_network_request(user_input: str, current_state: dict[str, Any]) 
         merged = _merge_with_state(parsed_json, current_state)
         missing, normalized = _validate_normalized_json(merged)
 
+        defaults_applied = False
+        if use_defaults:
+            if "routers" in missing:
+                normalized["routers"] = 1
+                missing.remove("routers")
+                defaults_applied = True
+            if "switches" in missing:
+                normalized["switches"] = 1
+                missing.remove("switches")
+                defaults_applied = True
+            if "pcs" in missing:
+                normalized["pcs"] = 2
+                missing.remove("pcs")
+                defaults_applied = True
+
         if validated_data.intent == ParseIntent.NOT_NETWORK:
-            return ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
+            res = ParseNetworkResponse(intent=ParseIntent.NOT_NETWORK, missing=[], json={})
+        elif missing:
+            res = ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, defaults_applied=defaults_applied, json=normalized)
+        else:
+            res = ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], defaults_applied=defaults_applied, json=normalized)
 
-        if missing:
-            return ParseNetworkResponse(intent=ParseIntent.INCOMPLETE, missing=missing, json={})
-
-        return ParseNetworkResponse(intent=ParseIntent.COMPLETE, missing=[], json=normalized)
+        # Cache the response
+        response_cache.set(cache_key, res.model_dump())
+        return res
 
     except Exception as exc:
         logger.error("Parser failure: %s", exc, exc_info=True)

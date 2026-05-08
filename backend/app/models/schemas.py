@@ -1,106 +1,27 @@
-"""
-Pydantic models for NetTrace API
-"""
+from __future__ import annotations
 
-import re
 import ipaddress
+import logging
+import re
 from enum import Enum
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.models.device_types import DeviceType
+from app.models.link_types import LinkType
+
+logger = logging.getLogger(__name__)
+
 
 def _normalize_service_list(value: Any) -> List[str]:
-    if not isinstance(value, (list, tuple, set)):
+    if not value:
         return []
-    out: List[str] = []
-    for item in value:
-        s = str(item or "").strip().lower()
-        if s:
-            out.append(s)
-    return out
-
-
-class RoutingProtocol(str, Enum):
-    STATIC = "static"
-    RIP = "RIP"
-    OSPF = "OSPF"
-    EIGRP = "EIGRP"
-
-
-class SubnetRequest(BaseModel):
-    """Request for a single subnet"""
-    name: str = Field(..., min_length=1, max_length=64, description="Subnet name")
-    required_hosts: int = Field(..., ge=1, le=16777214, description="Number of required hosts")
-    dns_server: Optional[str] = Field(default=None, description="Optional DNS server IP for this subnet")
-
-    @field_validator("name")
-    @classmethod
-    def validate_subnet_name(cls, value: str) -> str:
-        if not re.match(r"^[A-Za-z0-9_-]+$", value):
-            raise ValueError("Subnet name must contain only letters, numbers, underscore or dash")
-        return value
-
-
-
-class DeviceConfig(BaseModel):
-    """Device configuration"""
-    routers: int = Field(default=1, ge=1, le=5)
-    switches: int = Field(default=1, ge=0, le=10)
-    pcs: int = Field(default=1, ge=1)
-    servers: int = Field(default=0, ge=0)  
-
-
-class NetworkConfig(BaseModel):
-    """Parsed network configuration from NLP"""
-    base_network: str = Field(..., description="Base network in CIDR notation")
-    subnets: List[SubnetRequest] = Field(default_factory=list, max_length=10)
-    devices: DeviceConfig = Field(default_factory=DeviceConfig)
-    routing_protocol: RoutingProtocol = Field(default=RoutingProtocol.STATIC)
-    dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
-
-    @field_validator("base_network")
-    @classmethod
-    def validate_cidr(cls, value: str) -> str:
-        try:
-            ipaddress.ip_network(value, strict=False)
-        except ValueError as e:
-            raise ValueError(f"Invalid CIDR notation: {e}")
-        return value
-
-
-class SubnetResult(BaseModel):
-    """Calculated subnet result"""
-    name: str
-    network: str
-    mask: str
-    gateway: str
-    usable_range: List[str]
-    broadcast: str
-    total_hosts: int
-    usable_hosts: int
-    dns_server: Optional[str] = None
-
-
-class GenerateRequest(BaseModel):
-    """Request body for /api/generate endpoint"""
-    description: str = Field(..., min_length=10, description="Natural language network description")
-
-
-class GenerateResponse(BaseModel):
-    """Response from /api/generate endpoint"""
-    success: bool
-    config_json: Optional[NetworkConfig] = None
-    subnets: Optional[List[SubnetResult]] = None
-    cli_script: Optional[str] = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
-    request_id: Optional[str] = None
-
-
-class PktGenerateRequest(BaseModel):
-    """Request body for legacy /api/generate-pkt endpoint"""
-    description: str = Field(..., min_length=10, description="Natural language network description")
+    if isinstance(value, str):
+        return [s.strip().upper() for s in value.split(",") if s.strip()]
+    if isinstance(value, list):
+        return [str(s).strip().upper() for s in value if str(s).strip()]
+    return []
 
 
 class ParseIntent(str, Enum):
@@ -111,6 +32,7 @@ class ParseIntent(str, Enum):
 
 class ParseNetworkRequest(BaseModel):
     """Request body for /api/parse-network-request endpoint"""
+    use_defaults: bool = Field(default=False, description="Apply default values for missing fields (1 router, 1 switch, 2 PCs)")
     user_input: str = Field(..., min_length=1, description="User natural language input")
     current_state: Dict[str, Any] = Field(
         default_factory=dict,
@@ -228,7 +150,6 @@ class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-
 class PcConfig(BaseModel):
     mail_user: Optional[str] = Field(default=None)
     mail_password: Optional[str] = Field(default=None)
@@ -280,7 +201,6 @@ class NormalizedNetworkRequest(BaseModel):
             raise ValueError(f"routing_protocol must be one of {sorted(allowed_protocols)}")
         self.routing_protocol = protocol
 
-        # Normalize service names for downstream code (entrypoint/config_generator).
         if self.server_services:
             self.server_services = _normalize_service_list(self.server_services)
 
@@ -297,10 +217,20 @@ class ParseNetworkResponse(BaseModel):
     """Strict parser response contract for frontend orchestration."""
     intent: ParseIntent
     missing: List[str] = Field(default_factory=list)
+    defaults_applied: bool = Field(default=False)
     json_payload: Dict[str, Any] = Field(default_factory=dict, alias="json", serialization_alias="json")
-    error: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class GenerateResponse(BaseModel):
+    success: bool
+    config_json: Optional[NormalizedNetworkRequest] = None
+    subnets: Optional[List[Dict[str, Any]]] = None
+    cli_script: Optional[str] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+
 
 class PktGenerateResponse(BaseModel):
     """Response from /api/generate-pkt endpoint with .pkt file info"""
@@ -362,3 +292,29 @@ class UserCapabilitiesResponse(BaseModel):
     weekly_generation_limit: Optional[int] = None
     weekly_generation_used: int = 0
     weekly_generation_remaining: Optional[int] = None
+
+
+class RoutingProtocol(str, Enum):
+    STATIC = "static"
+    RIP = "rip"
+    OSPF = "ospf"
+    EIGRP = "eigrp"
+
+
+class SubnetRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    required_hosts: int = Field(..., ge=1)
+
+
+class DeviceConfig(BaseModel):
+    routers: int = Field(..., ge=1)
+    switches: int = Field(..., ge=0)
+    pcs: int = Field(..., ge=1)
+
+
+class NetworkConfig(BaseModel):
+    base_network: str = Field(..., description="Base network in CIDR notation")
+    subnets: List[SubnetRequest] = Field(..., min_length=1)
+    devices: DeviceConfig
+    routing_protocol: RoutingProtocol
+    dhcp_dns: Optional[str] = None
