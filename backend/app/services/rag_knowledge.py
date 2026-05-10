@@ -9,8 +9,8 @@ NETWORK_PARSER_DOCUMENTS = [
         "tags": ["json", "schema", "routing", "subnets"],
         "content": (
             "The normalized network JSON must contain base_network in CIDR notation, routers >= 1, "
-            "switches >= 0, pcs >= 1, routing_protocol in STATIC/RIP/OSPF/EIGRP, and optional subnets "
-            "as a list of {name, required_hosts}."
+            "switches >= 0, pcs >= 1, optional servers >= 0, routing_protocol in STATIC/RIP/OSPF/EIGRP, "
+            "and optional subnets as a list of {name, required_hosts}."
         ),
     },
     {
@@ -35,6 +35,15 @@ NETWORK_PARSER_DOCUMENTS = [
         "content": (
             "If the user mentions VLANs, NAT, ACLs, DHCP, servers, or segmented networks, preserve these "
             "as structured hints only when they are explicit. Prefer exact extraction over speculative design."
+        ),
+    },
+    {
+        "id": "examples",
+        "tags": ["examples", "counts", "cidr", "hosts"],
+        "content": (
+            "Examples: '10.0.0.0/24 con 2 router e 3 switch in OSPF' => extract base_network, routers=2, "
+            "switches=3, routing_protocol=OSPF. 'Admin (20 host), Guest (50 host)' => subnets "
+            "[{name:'ADMIN',required_hosts:20},{name:'GUEST',required_hosts:50}]."
         ),
     },
 ]

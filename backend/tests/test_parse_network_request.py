@@ -9,6 +9,7 @@ async def test_parse_network_request_not_network_intent():
     response = await parse_network_request("scrivimi una poesia", {})
     assert response.intent == ParseIntent.NOT_NETWORK
     assert response.json_payload == {}
+    assert response.suggested_defaults == {}
 
 
 @pytest.mark.asyncio
@@ -19,6 +20,13 @@ async def test_parse_network_request_incomplete_without_required_fields(monkeypa
 
     assert response.intent == ParseIntent.INCOMPLETE
     assert set(response.missing) == {"routers", "switches", "pcs", "routing_protocol"}
+    assert response.json_payload["base_network"] == "10.0.0.0/24"
+    assert response.suggested_defaults == {
+        "routers": 1,
+        "switches": 1,
+        "pcs": 4,
+        "routing_protocol": "STATIC",
+    }
 
 
 @pytest.mark.asyncio
@@ -39,6 +47,7 @@ async def test_parse_network_request_complete_from_state(monkeypatch):
 
     assert response.intent == ParseIntent.COMPLETE
     assert response.json_payload["routing_protocol"] == "STATIC"
+    assert response.suggested_defaults == {}
 
 
 @pytest.mark.asyncio
@@ -83,4 +92,22 @@ async def test_parse_network_request_detects_network_context_from_cidr_and_nat(m
     response = await parse_network_request("Configura 10.0.0.0/24 con NAT e gateway centrale", {})
 
     assert response.intent == ParseIntent.INCOMPLETE
-    assert "base_network" in response.missing
+    assert "base_network" not in response.missing
+    assert response.json_payload["base_network"] == "10.0.0.0/24"
+
+
+@pytest.mark.asyncio
+async def test_parse_network_request_heuristically_extracts_counts_and_protocol(monkeypatch):
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+
+    response = await parse_network_request(
+        "Crea una rete 192.168.10.0/24 con 2 router, 3 switch, 25 pc e OSPF",
+        {},
+    )
+
+    assert response.intent == ParseIntent.COMPLETE
+    assert response.json_payload["base_network"] == "192.168.10.0/24"
+    assert response.json_payload["routers"] == 2
+    assert response.json_payload["switches"] == 3
+    assert response.json_payload["pcs"] == 25
+    assert response.json_payload["routing_protocol"] == "OSPF"

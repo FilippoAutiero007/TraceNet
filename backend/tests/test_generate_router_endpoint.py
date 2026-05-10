@@ -31,6 +31,34 @@ def test_parse_network_request_endpoint_returns_502_for_parser_internal_errors(m
     assert response.headers["X-Request-ID"] == payload["request_id"]
 
 
+def test_parse_network_request_endpoint_exposes_partial_json_and_defaults(monkeypatch):
+    async def _fake_parse(user_input, current_state):
+        from app.models.schemas import ParseNetworkResponse, ParseIntent
+
+        return ParseNetworkResponse(
+            intent=ParseIntent.INCOMPLETE,
+            missing=["pcs", "routing_protocol"],
+            json={"base_network": "10.0.0.0/24", "routers": 1, "switches": 1},
+            suggestedDefaults={"pcs": 4, "routing_protocol": "STATIC"},
+        )
+
+    monkeypatch.setattr("app.routers.generate.parse_network_request", _fake_parse)
+
+    response = client.post(
+        "/api/parse-network-request",
+        json={"user_input": "crea una rete 10.0.0.0/24", "current_state": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "incomplete",
+        "missing": ["pcs", "routing_protocol"],
+        "json": {"base_network": "10.0.0.0/24", "routers": 1, "switches": 1},
+        "suggestedDefaults": {"pcs": 4, "routing_protocol": "STATIC"},
+        "error": None,
+    }
+
+
 def test_manual_network_request_accepts_nat_configuration():
     request = ManualNetworkRequest(
         base_network="10.0.0.0/24",

@@ -9,6 +9,7 @@ export interface ParseNetworkResponse {
   intent: 'not_network' | 'incomplete' | 'complete';
   missing: string[];
   json: Record<string, unknown>;
+  suggestedDefaults?: Record<string, unknown>;
   error?: string | null;
 }
 

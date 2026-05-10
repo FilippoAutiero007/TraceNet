@@ -8,9 +8,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models.device_types import DeviceType
-from app.models.link_types import LinkType
-
 logger = logging.getLogger(__name__)
 
 
@@ -18,9 +15,9 @@ def _normalize_service_list(value: Any) -> List[str]:
     if not value:
         return []
     if isinstance(value, str):
-        return [s.strip().upper() for s in value.split(",") if s.strip()]
+        return [s.strip().lower() for s in value.split(",") if s.strip()]
     if isinstance(value, list):
-        return [str(s).strip().upper() for s in value if str(s).strip()]
+        return [str(s).strip().lower() for s in value if str(s).strip()]
     return []
 
 
@@ -32,7 +29,6 @@ class ParseIntent(str, Enum):
 
 class ParseNetworkRequest(BaseModel):
     """Request body for /api/parse-network-request endpoint"""
-    use_defaults: bool = Field(default=False, description="Apply default values for missing fields (1 router, 1 switch, 2 PCs)")
     user_input: str = Field(..., min_length=1, description="User natural language input")
     current_state: Dict[str, Any] = Field(
         default_factory=dict,
@@ -217,8 +213,13 @@ class ParseNetworkResponse(BaseModel):
     """Strict parser response contract for frontend orchestration."""
     intent: ParseIntent
     missing: List[str] = Field(default_factory=list)
-    defaults_applied: bool = Field(default=False)
     json_payload: Dict[str, Any] = Field(default_factory=dict, alias="json", serialization_alias="json")
+    suggested_defaults: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="suggestedDefaults",
+        serialization_alias="suggestedDefaults",
+    )
+    error: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -304,6 +305,7 @@ class RoutingProtocol(str, Enum):
 class SubnetRequest(BaseModel):
     name: str = Field(..., min_length=1)
     required_hosts: int = Field(..., ge=1)
+    dns_server: Optional[str] = Field(default=None)
 
 
 class DeviceConfig(BaseModel):
@@ -318,3 +320,15 @@ class NetworkConfig(BaseModel):
     devices: DeviceConfig
     routing_protocol: RoutingProtocol
     dhcp_dns: Optional[str] = None
+
+
+class SubnetResult(BaseModel):
+    name: str
+    network: str
+    mask: str
+    gateway: str
+    usable_range: List[str]
+    broadcast: str
+    total_hosts: int
+    usable_hosts: int
+    dns_server: Optional[str] = None

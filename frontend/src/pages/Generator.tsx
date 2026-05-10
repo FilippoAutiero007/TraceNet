@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { getApiBaseUrl } from '@/lib/api';
-import { NetworkInput } from '@/components/NetworkInput';
+import { NetworkInput, type AssistantHint, type ChatMessage } from '@/components/NetworkInput';
 import { DownloadResult } from '@/components/DownloadResult';
 import { SEOHead } from '@/components/SEOHead';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, FileWarning, HelpCircle, ArrowRight } from 'lucide-react';
+import { AlertCircle, FileWarning } from 'lucide-react';
 import type { PktAnalysisResponse } from '@/lib/api';
 import { Footer } from '@/sections/Footer';
 
@@ -41,8 +41,8 @@ interface GenerateResponse {
 interface ParseResponse {
   intent: 'not_network' | 'incomplete' | 'complete';
   missing: string[];
-  defaults_applied: boolean;
   json: Record<string, unknown>;
+  suggestedDefaults?: Record<string, unknown>;
   error?: string | null;
 }
 
@@ -58,11 +58,11 @@ interface DownloadResultData {
 function isDownloadResultData(result: GenerateResponse | null): result is DownloadResultData {
   return Boolean(
     result &&
-    result.success &&
-    result.message &&
-    result.pkt_download_url &&
-    result.config_summary &&
-    result.subnets
+      result.success &&
+      result.message &&
+      result.pkt_download_url &&
+      result.config_summary &&
+      result.subnets,
   );
 }
 
@@ -72,18 +72,79 @@ export function Generator() {
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [conversationState, setConversationState] = useState<Record<string, unknown>>({});
-  const [missingFields, setMissingFields] = useState<string[]>([]);
-  const [lastInput, setLastInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: 'assistant-welcome',
+      role: 'assistant',
+      content:
+        'Descrivimi la rete in linguaggio naturale. Se mancano CIDR, numero di device o protocollo, ti chiederò solo quei dati e puoi anche proseguire con i default.',
+    },
+  ]);
+  const [pendingParse, setPendingParse] = useState<ParseResponse | null>(null);
   const [analysisResult] = useState<PktAnalysisResponse | null>(null);
 
-  const handleGenerate = async (description: string, useDefaults: boolean = false) => {
+  const appendChatMessage = (role: ChatMessage['role'], content: string) => {
+    setChatMessages((current) => [
+      ...current,
+      {
+        id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role,
+        content,
+      },
+    ]);
+  };
+
+  const fieldLabels: Record<string, string> = {
+    base_network: 'rete base in CIDR',
+    routers: 'numero di router',
+    switches: 'numero di switch',
+    pcs: 'numero di PC',
+    routing_protocol: 'protocollo di routing',
+  };
+
+  const formatMissing = (fields: string[]) => fields.map((field) => fieldLabels[field] || field).join(', ');
+
+  const generateFromPayload = async (payload: Record<string, unknown>, token?: string | null) => {
+    const apiBaseUrl = getApiBaseUrl();
+    const generationResponse = await fetch(`${apiBaseUrl}/api/generate-pkt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!generationResponse.ok) {
+      if (generationResponse.status >= 500) {
+        throw new Error('Cannot connect to server. Make sure backend is running on port 8000.');
+      }
+      const errorData = await generationResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || errorData.detail || `Server error: ${generationResponse.status}`);
+    }
+
+    const data: GenerateResponse = await generationResponse.json();
+
+    if (data.success && data.pkt_download_url) {
+      setResult(data);
+      setPendingParse(null);
+      appendChatMessage(
+        'assistant',
+        `Configurazione completata. Genero la rete con ${String(payload.base_network || 'rete default')} e ${
+          String(payload.routing_protocol || 'routing default')
+        }.`,
+      );
+      return;
+    }
+
+    throw new Error(data.error || data.message || 'Failed to generate network');
+  };
+
+  const handleGenerate = async (description: string) => {
     setIsGenerating(true);
     setError(null);
-    if (!useDefaults) {
-        setResult(null);
-        setMissingFields([]);
-    }
-    setLastInput(description);
+    setResult(null);
+    appendChatMessage('user', description);
 
     const apiBaseUrl = getApiBaseUrl();
 
@@ -98,7 +159,6 @@ export function Generator() {
         body: JSON.stringify({
           user_input: description,
           current_state: conversationState,
-          use_defaults: useDefaults,
         }),
       });
 
@@ -113,40 +173,22 @@ export function Generator() {
         throw new Error('La richiesta non sembra relativa alla generazione di una rete.');
       }
 
-      setConversationState(parseData.json);
-
       if (parseData.intent === 'incomplete') {
-        setMissingFields(parseData.missing);
+        setConversationState(parseData.json || {});
+        setPendingParse(parseData);
+        appendChatMessage(
+          'assistant',
+          `Mi mancano ancora: ${formatMissing(parseData.missing)}. Puoi scriverli nel prossimo messaggio oppure usare i parametri di default proposti.`,
+        );
+        if (parseData.error) {
+          setError(parseData.error);
+        }
         return;
       }
 
-      // If we reach here, intent is complete
-      setMissingFields([]);
-
-      const generationResponse = await fetch(`${apiBaseUrl}/api/generate-pkt`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(parseData.json),
-      });
-
-      if (!generationResponse.ok) {
-        if (generationResponse.status >= 500) {
-          throw new Error('Cannot connect to server. Make sure backend is running on port 8000.');
-        }
-        const errorData = await generationResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.detail || `Server error: ${generationResponse.status}`);
-      }
-
-      const data: GenerateResponse = await generationResponse.json();
-
-      if (data.success && data.pkt_download_url) {
-        setResult(data);
-      } else {
-        throw new Error(data.error || data.message || 'Failed to generate network');
-      }
+      setConversationState(parseData.json);
+      setPendingParse(null);
+      await generateFromPayload(parseData.json, token);
     } catch (err) {
       console.error('Generation error:', err);
       if (err instanceof TypeError && err.message.includes('fetch')) {
@@ -164,21 +206,53 @@ export function Generator() {
   const handleRetry = () => {
     setError(null);
     setResult(null);
-    setMissingFields([]);
-    setConversationState({});
   };
 
-  const handleTraceNetDecide = () => {
-    handleGenerate(lastInput, true);
+  const handleUseDefaults = async () => {
+    if (!pendingParse) {
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+    setResult(null);
+
+    const finalPayload = {
+      ...(pendingParse.json || {}),
+      ...(pendingParse.suggestedDefaults || {}),
+    };
+
+    try {
+      const token = await getToken();
+      setConversationState(finalPayload);
+      appendChatMessage(
+        'user',
+        `Usa i default per: ${Object.keys(pendingParse.suggestedDefaults || {}).join(', ') || 'campi mancanti'}`,
+      );
+      await generateFromPayload(finalPayload, token);
+    } catch (err) {
+      console.error('Default generation error:', err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const fieldLabels: Record<string, string> = {
-    base_network: 'Base Network (es. 192.168.1.0/24)',
-    routers: 'Numero di Router',
-    switches: 'Numero di Switch',
-    pcs: 'Numero di PC',
-    routing_protocol: 'Protocollo di Routing (STATIC, RIP, OSPF, EIGRP)',
-  };
+  const assistantHint: AssistantHint | null = pendingParse
+    ? {
+        message: `Servono ancora ${pendingParse.missing.length} parametri per completare il JSON da inviare al server.`,
+        missing: pendingParse.missing,
+        suggestedDefaults: pendingParse.suggestedDefaults || {},
+        onUseDefaults:
+          pendingParse.suggestedDefaults && Object.keys(pendingParse.suggestedDefaults).length > 0
+            ? handleUseDefaults
+            : undefined,
+      }
+    : null;
 
   return (
     <>
@@ -201,49 +275,17 @@ export function Generator() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
-              <NetworkInput onGenerate={handleGenerate} isGenerating={isGenerating} />
-
-              {missingFields.length > 0 && !error && (
-                <Card className="border-cyan-800 bg-slate-900 shadow-lg shadow-cyan-500/10">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-cyan-400">
-                      <HelpCircle className="h-5 w-5" />
-                      Informazioni Mancanti
-                    </CardTitle>
-                    <CardDescription>
-                      Ho bisogno di qualche dettaglio in più per generare la tua rete.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      {missingFields.map((field) => (
-                        <div key={field} className="flex items-center gap-2 text-slate-300 text-sm">
-                          <ArrowRight className="h-4 w-4 text-cyan-500" />
-                          <span>{fieldLabels[field] || field}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="pt-4 flex flex-col gap-3">
-                      <p className="text-xs text-slate-500 italic">
-                        Puoi rispondere scrivendo i valori sopra nel campo di testo principale.
-                      </p>
-                      <Button
-                        onClick={handleTraceNetDecide}
-                        disabled={isGenerating}
-                        className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 font-medium"
-                      >
-                        Let TraceNet decide (Default values)
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+              <NetworkInput
+                onGenerate={handleGenerate}
+                isGenerating={isGenerating}
+                chatMessages={chatMessages}
+                assistantHint={assistantHint}
+              />
 
               {error && (
                 <Alert variant="destructive" className="bg-red-950 border-red-900">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Error</AlertTitle>
+                  <AlertTitle>Errore</AlertTitle>
                   <AlertDescription className="mt-2">
                     {error}
                     <Button
@@ -252,7 +294,7 @@ export function Generator() {
                       onClick={handleRetry}
                       className="mt-3 w-full border-red-800 hover:bg-red-900"
                     >
-                      Try Again
+                      Riprova
                     </Button>
                   </AlertDescription>
                 </Alert>
