@@ -55,6 +55,14 @@ interface DownloadResultData {
   subnets: SubnetInfo[];
 }
 
+const CLIENT_DEFAULTS: Record<string, unknown> = {
+  base_network: '192.168.1.0/24',
+  routers: 1,
+  switches: 1,
+  pcs: 4,
+  routing_protocol: 'STATIC',
+};
+
 function isDownloadResultData(result: GenerateResponse | null): result is DownloadResultData {
   return Boolean(
     result &&
@@ -116,10 +124,14 @@ export function Generator() {
     });
 
     if (!generationResponse.ok) {
-      if (generationResponse.status >= 500) {
-        throw new Error('Cannot connect to server. Make sure backend is running on port 8000.');
-      }
       const errorData = await generationResponse.json().catch(() => ({}));
+      if (generationResponse.status >= 500) {
+        throw new Error(
+          errorData.error ||
+            errorData.detail ||
+            'Server error during network generation. Check backend logs and try again.',
+        );
+      }
       throw new Error(errorData.error || errorData.detail || `Server error: ${generationResponse.status}`);
     }
 
@@ -225,6 +237,7 @@ export function Generator() {
     setResult(null);
 
     const finalPayload = {
+      ...CLIENT_DEFAULTS,
       ...(pendingParse.json || {}),
       ...(pendingParse.suggestedDefaults || {}),
     };
