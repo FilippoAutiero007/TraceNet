@@ -55,6 +55,12 @@ interface DownloadResultData {
   subnets: SubnetInfo[];
 }
 
+interface ApiErrorPayload {
+  error?: string;
+  detail?: string;
+  code?: string;
+}
+
 const CLIENT_DEFAULTS: Record<string, unknown> = {
   base_network: '192.168.1.0/24',
   routers: 1,
@@ -112,19 +118,61 @@ export function Generator() {
 
   const formatMissing = (fields: string[]) => fields.map((field) => fieldLabels[field] || field).join(', ');
 
+  const isAuthProviderUnavailable = (status: number, errorData: ApiErrorPayload) =>
+    status === 503 && errorData.code === 'AUTH_PROVIDER_UNAVAILABLE';
+
+  const fetchWithOptionalAuthRetry = async (
+    url: string,
+    options: {
+      method: 'POST' | 'GET';
+      token?: string | null;
+      body?: string;
+    },
+  ) => {
+    const runFetch = async (includeAuth: boolean) =>
+      fetch(url, {
+        method: options.method,
+        headers: {
+          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(includeAuth && options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+        },
+        body: options.body,
+      });
+
+    let response = await runFetch(true);
+    if (response.ok || !options.token) {
+      return response;
+    }
+
+    const errorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+    if (!isAuthProviderUnavailable(response.status, errorData)) {
+      return { response, errorData };
+    }
+
+    response = await runFetch(false);
+    if (response.ok) {
+      return response;
+    }
+
+    const retryErrorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+    return { response, errorData: retryErrorData };
+  };
+
   const generateFromPayload = async (payload: Record<string, unknown>, token?: string | null) => {
     const apiBaseUrl = getApiBaseUrl();
-    const generationResponse = await fetch(`${apiBaseUrl}/api/generate-pkt`, {
+    const generationResult = await fetchWithOptionalAuthRetry(`${apiBaseUrl}/api/generate-pkt`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      token,
       body: JSON.stringify(payload),
     });
+    const generationResponse =
+      generationResult instanceof Response ? generationResult : generationResult.response;
 
     if (!generationResponse.ok) {
-      const errorData = await generationResponse.json().catch(() => ({}));
+      const errorData =
+        generationResult instanceof Response
+          ? ((await generationResponse.json().catch(() => ({}))) as ApiErrorPayload)
+          : generationResult.errorData;
       if (generationResponse.status >= 500) {
         throw new Error(
           errorData.error ||
@@ -169,20 +217,21 @@ export function Generator() {
 
     try {
       const token = await getToken();
-      const parseResponse = await fetch(`${apiBaseUrl}/api/parse-network-request`, {
+      const parseResult = await fetchWithOptionalAuthRetry(`${apiBaseUrl}/api/parse-network-request`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        token,
         body: JSON.stringify({
           user_input: description,
           current_state: requestState,
         }),
       });
+      const parseResponse = parseResult instanceof Response ? parseResult : parseResult.response;
 
       if (!parseResponse.ok) {
-        const errorData = await parseResponse.json().catch(() => ({}));
+        const errorData =
+          parseResult instanceof Response
+            ? ((await parseResponse.json().catch(() => ({}))) as ApiErrorPayload)
+            : parseResult.errorData;
         throw new Error(errorData.error || errorData.detail || 'Parser endpoint failed');
       }
 
