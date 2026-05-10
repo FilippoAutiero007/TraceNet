@@ -3,6 +3,7 @@
 import os
 import logging
 import ipaddress
+from time import perf_counter
 from threading import Lock
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -94,8 +95,18 @@ def _validate_filename(filename: str) -> str:
 @router.post("/parse-network-request", response_model=ParseNetworkResponse)
 async def parse_network_endpoint(request: ParseNetworkRequest):
     """LLM parser endpoint returning only strict intent + normalized JSON."""
+    started_at = perf_counter()
     try:
-        return await parse_network_request(request.user_input, request.current_state)
+        response = await parse_network_request(request.user_input, request.current_state)
+        logger.info(
+            "parse-network-request completed",
+            extra={
+                "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+                "intent": response.intent.value,
+                "missing": response.missing,
+            },
+        )
+        return response
     except ParserServiceError as exc:
         logger.error("Parse network request failed: %s", exc, exc_info=True)
         raise api_error(502, "PARSER_BACKEND_FAILURE", "Parser service unavailable.") from exc
@@ -152,14 +163,17 @@ async def generate_pkt_file(
     auth: AuthContext | None = Depends(get_optional_auth_context),
 ):
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
+    started_at = perf_counter()
     try:
         consume_generation_quota(auth, http_request)
+        after_quota = perf_counter()
         subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
         protocol_value = "static" if request.routing_protocol == "STATIC" else request.routing_protocol
 
         network_config_dict = _build_pkt_network_config_dict(request, subnets_input, protocol_value)
 
         subnets = calculate_vlsm(request.base_network, subnets_input)
+        after_vlsm = perf_counter()
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
@@ -179,12 +193,28 @@ async def generate_pkt_file(
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
             _pkt_generation_lock.release()
+        after_generation = perf_counter()
 
         if not result.get("success"):
             raise Exception(result.get("error", "Unknown error during PKT file save"))
 
         pkt_filename = os.path.basename(result["pkt_path"])
         xml_filename = os.path.basename(result["xml_path"])
+
+        logger.info(
+            "generate-pkt completed",
+            extra={
+                "duration_ms": round((after_generation - started_at) * 1000, 2),
+                "quota_ms": round((after_quota - started_at) * 1000, 2),
+                "vlsm_ms": round((after_vlsm - after_quota) * 1000, 2),
+                "pkt_generation_ms": round((after_generation - after_vlsm) * 1000, 2),
+                "routers": request.routers,
+                "switches": request.switches,
+                "pcs": request.pcs,
+                "subnets_count": len(subnets),
+                "encoding_used": result.get("encoding_used"),
+            },
+        )
 
         return PktGenerateResponse(
             success=True,

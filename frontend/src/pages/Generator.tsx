@@ -68,7 +68,7 @@ const CLIENT_DEFAULTS: Record<string, unknown> = {
   pcs: 4,
   routing_protocol: 'STATIC',
 };
-const REQUEST_TIMEOUT_MS = 60000;
+const REQUEST_TIMEOUT_MS = 180000;
 
 function isDownloadResultData(result: GenerateResponse | null): result is DownloadResultData {
   return Boolean(
@@ -168,7 +168,10 @@ export function Generator() {
       return { response, errorData: retryErrorData };
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new Error('La generazione sta impiegando troppo tempo. Timeout dopo 60 secondi.');
+        throw new Error(
+          'La generazione sta impiegando troppo tempo. Timeout dopo 180 secondi. '
+          + 'Se il backend e in cold start o sotto carico, il primo tentativo puo richiedere piu tempo del normale.',
+        );
       }
       throw error;
     }
