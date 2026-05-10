@@ -202,6 +202,22 @@ def _suggest_defaults(missing: list[str]) -> dict[str, Any]:
     return {field: DEFAULT_FIELD_VALUES[field] for field in missing if field in DEFAULT_FIELD_VALUES}
 
 
+def _is_simple_single_network(data: dict[str, Any]) -> bool:
+    routers = data.get("routers")
+    servers = data.get("servers", 0)
+    subnets = data.get("subnets") if isinstance(data.get("subnets"), list) else []
+    topology = data.get("topology")
+    vlans = data.get("vlans") if isinstance(data.get("vlans"), list) else []
+
+    return (
+        servers in (None, 0)
+        and topology in (None, {})
+        and len(vlans) == 0
+        and len(subnets) <= 1
+        and (routers is None or routers == 1)
+    )
+
+
 def _merge_with_state(parsed_json: dict[str, Any], current_state: dict[str, Any]) -> dict[str, Any]:
     merged = dict(current_state or {})
     for key, value in (parsed_json or {}).items():
@@ -218,7 +234,7 @@ def _merge_with_state(parsed_json: dict[str, Any], current_state: dict[str, Any]
 
 
 def _validate_normalized_json(data: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
-    required = ["base_network", "routers", "switches", "pcs", "routing_protocol"]
+    required = ["base_network", "routers", "switches", "pcs"]
     missing: list[str] = []
 
     normalized = dict(data)
@@ -239,10 +255,12 @@ def _validate_normalized_json(data: dict[str, Any]) -> tuple[list[str], dict[str
         missing.append("pcs")
 
     protocol = _normalize_routing_protocol(normalized.get("routing_protocol"))
-    if protocol is None:
-        missing.append("routing_protocol")
-    else:
+    if protocol is not None:
         normalized["routing_protocol"] = protocol
+    elif _is_simple_single_network(normalized):
+        normalized["routing_protocol"] = "STATIC"
+    else:
+        missing.append("routing_protocol")
 
     if not isinstance(normalized.get("subnets"), list):
         normalized["subnets"] = []

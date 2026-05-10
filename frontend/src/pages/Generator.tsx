@@ -145,6 +145,13 @@ export function Generator() {
     setError(null);
     setResult(null);
     appendChatMessage('user', description);
+    const isFollowUp = pendingParse !== null;
+    const requestState = isFollowUp ? conversationState : {};
+
+    if (!isFollowUp) {
+      setConversationState({});
+      setPendingParse(null);
+    }
 
     const apiBaseUrl = getApiBaseUrl();
 
@@ -158,7 +165,7 @@ export function Generator() {
         },
         body: JSON.stringify({
           user_input: description,
-          current_state: conversationState,
+          current_state: requestState,
         }),
       });
 

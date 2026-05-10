@@ -19,13 +19,13 @@ async def test_parse_network_request_incomplete_without_required_fields(monkeypa
     response = await parse_network_request("crea una rete aziendale", {"base_network": "10.0.0.0/24"})
 
     assert response.intent == ParseIntent.INCOMPLETE
-    assert set(response.missing) == {"routers", "switches", "pcs", "routing_protocol"}
+    assert set(response.missing) == {"routers", "switches", "pcs"}
     assert response.json_payload["base_network"] == "10.0.0.0/24"
+    assert response.json_payload["routing_protocol"] == "STATIC"
     assert response.suggested_defaults == {
         "routers": 1,
         "switches": 1,
         "pcs": 4,
-        "routing_protocol": "STATIC",
     }
 
 
@@ -111,3 +111,16 @@ async def test_parse_network_request_heuristically_extracts_counts_and_protocol(
     assert response.json_payload["switches"] == 3
     assert response.json_payload["pcs"] == 25
     assert response.json_payload["routing_protocol"] == "OSPF"
+
+
+@pytest.mark.asyncio
+async def test_parse_network_request_defaults_to_static_for_simple_single_network(monkeypatch):
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+
+    response = await parse_network_request(
+        "Crea una rete 192.168.10.0/24 con 1 router, 1 switch e 12 pc",
+        {},
+    )
+
+    assert response.intent == ParseIntent.COMPLETE
+    assert response.json_payload["routing_protocol"] == "STATIC"
