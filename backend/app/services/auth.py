@@ -152,7 +152,14 @@ async def get_optional_auth_context(request: Request) -> Optional[AuthContext]:
     token = _parse_bearer_token(request)
     if not token:
         return None
-    return await verify_clerk_session_token(request)
+    try:
+        return await verify_clerk_session_token(request)
+    except HTTPException as exc:
+        # Optional auth should not block anonymous-safe endpoints if the auth
+        # provider is temporarily unavailable. Invalid tokens must still fail.
+        if exc.status_code == 503:
+            return None
+        raise
 
 
 async def require_pro_user(request: Request) -> AuthContext:

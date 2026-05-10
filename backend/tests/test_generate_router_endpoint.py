@@ -7,6 +7,7 @@ from app.services.pkt_crypto import encrypt_pkt_data
 from app.services.auth import AuthContext, get_optional_auth_context, require_pro_user
 from app.services.generation_quota import reset_generation_quota_state
 from app.services.nlp_parser import ParserServiceError
+from app.utils.errors import api_error
 
 
 client = TestClient(app)
@@ -157,6 +158,39 @@ def test_generate_pkt_uses_normalized_protocol_and_single_server_services_payloa
     assert captured["config"]["routing_protocol"] == "static"
     assert captured["config"]["server_services"] == ["dns", "http"]
     assert payload["config_summary"]["routing_protocol"] == "static"
+
+
+def test_generate_pkt_tolerates_optional_auth_provider_unavailable(monkeypatch):
+    def _fake_save_pkt_file(subnets, config, output_dir):
+        return {
+            "success": True,
+            "pkt_path": "/tmp/tracenet/fake.pkt",
+            "xml_path": "/tmp/tracenet/fake.xml",
+            "encoding_used": "template_based",
+            "file_size": 123,
+        }
+
+    async def _auth_down(request):
+        raise api_error(503, "AUTH_PROVIDER_UNAVAILABLE", "Authentication service unavailable.")
+
+    monkeypatch.setattr("app.routers.generate.save_pkt_file", _fake_save_pkt_file)
+    monkeypatch.setattr("app.services.auth.verify_clerk_session_token", _auth_down)
+
+    response = client.post(
+        "/api/generate-pkt",
+        headers={"Authorization": "Bearer maybe-valid-token"},
+        json={
+            "base_network": "10.0.0.0/24",
+            "routers": 1,
+            "switches": 1,
+            "pcs": 5,
+            "routing_protocol": "STATIC",
+            "subnets": [{"name": "LAN", "required_hosts": 20}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
 
 
 def test_generate_pkt_enforces_weekly_quota_for_free_users(monkeypatch):
