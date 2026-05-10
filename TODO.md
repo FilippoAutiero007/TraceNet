@@ -257,3 +257,65 @@ Obiettivo: mantenere TraceNet robusto (backend), consistente (frontend), sicuro 
   - Task:
     - Esportare automaticamente lo schema OpenAPI di FastAPI e documentare gli endpoint principali.
     - Aggiungere esempi di richieste (curl/HTTPie) per ogni endpoint.
+
+---
+
+## Audit 2026-05-10
+
+### High
+
+- **Uniformare il layer fetch frontend**
+  - Evidence:
+    - [frontend/src/pages/Generator.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/pages/Generator.tsx) implementa timeout, retry auth opzionale e merge dei payload.
+    - [frontend/src/lib/api.ts](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/lib/api.ts) usa invece `fetch` diretto senza le stesse protezioni.
+  - Impact:
+    - Stesse API backend possono comportarsi in modo diverso a seconda della pagina che le chiama.
+
+- **Ridurre dipendenza hardcoded da Render nel frontend**
+  - Evidence:
+    - [frontend/src/config.ts](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/config.ts) usa `https://tracenet-api.onrender.com` come fallback di produzione.
+  - Impact:
+    - In assenza di `VITE_API_URL` corretta, il frontend puo parlare con backend sbagliato, spento o non aggiornato.
+
+- **Rendere la diagnostica health piu vicina alla generazione reale**
+  - Evidence:
+    - [backend/app/main.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/main.py) espone `/api/health` minimale.
+    - La generazione reale dipende anche da output dir, template PKT, auth opzionale, lock e filesystem.
+  - Impact:
+    - Il servizio puo risultare sano mentre `/api/generate-pkt` fallisce o resta lento.
+
+- **Rimuovere credenziali AI dal frontend**
+  - Evidence:
+    - [frontend/src/hooks/useMistral.ts](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/hooks/useMistral.ts) istanzia il client Mistral nel browser con `VITE_MISTRAL_API_KEY`.
+  - Impact:
+    - Rischio sicurezza alto e possibile fonte di errori CSP/bundling.
+
+### Medium
+
+- **Allineare CORS applicativo e Docker Compose dev**
+  - Evidence:
+    - [backend/app/config.py](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/backend/app/config.py) ammette piu origini.
+    - [docker-compose.yml](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/docker-compose.yml) limita `ALLOWED_ORIGINS` a `http://localhost:5173`.
+  - Impact:
+    - Ambiente locale Docker e ambiente applicativo possono divergere, producendo `Failed to fetch` solo in certi setup.
+
+- **Documentare che il router attuale e HashRouter**
+  - Evidence:
+    - [frontend/src/App.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/App.tsx) usa `HashRouter`.
+    - Alcune note di backlog storico parlano ancora di `BrowserRouter`.
+  - Impact:
+    - Rischio di perseguire fix di routing non piu aderenti allo stato reale del codice.
+
+- **Completare la pagina Analisi o marcarla come non implementata**
+  - Evidence:
+    - [frontend/src/pages/Analisi.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/pages/Analisi.tsx) mostra upload e CTA ma non esegue nessuna chiamata API nel file.
+  - Impact:
+    - UX fuorviante e segnalazioni di bug poco actionable.
+
+### Low
+
+- **Valutare download senza `window.open`**
+  - Evidence:
+    - [frontend/src/components/DownloadResult.tsx](/mnt/c/Users/pippo/OneDrive/Desktop/TraceNet/frontend/src/components/DownloadResult.tsx) apre i file in nuova tab.
+  - Impact:
+    - Popup blocker e comportamenti inconsistenti tra browser possono essere scambiati per errori rete.
