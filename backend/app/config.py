@@ -35,7 +35,13 @@ class Settings(BaseSettings):
     
     # CORS
     allowed_origins: str = Field(
-        default="http://localhost:5173,https://tracenet.vercel.app",
+        default=(
+            "http://localhost:5173,"
+            "http://localhost:4173,"
+            "https://tracenet.vercel.app,"
+            "https://nettrace.app,"
+            "https://www.nettrace.app"
+        ),
         description="Comma-separated list of allowed CORS origins"
     )
     

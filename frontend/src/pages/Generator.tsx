@@ -68,6 +68,7 @@ const CLIENT_DEFAULTS: Record<string, unknown> = {
   pcs: 4,
   routing_protocol: 'STATIC',
 };
+const REQUEST_TIMEOUT_MS = 60000;
 
 function isDownloadResultData(result: GenerateResponse | null): result is DownloadResultData {
   return Boolean(
@@ -129,33 +130,48 @@ export function Generator() {
       body?: string;
     },
   ) => {
-    const runFetch = async (includeAuth: boolean) =>
-      fetch(url, {
-        method: options.method,
-        headers: {
-          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-          ...(includeAuth && options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-        },
-        body: options.body,
-      });
+    const runFetch = async (includeAuth: boolean) => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        return await fetch(url, {
+          method: options.method,
+          headers: {
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(includeAuth && options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+          },
+          body: options.body,
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
 
-    let response = await runFetch(true);
-    if (response.ok || !options.token) {
-      return response;
+    try {
+      let response = await runFetch(true);
+      if (response.ok || !options.token) {
+        return response;
+      }
+
+      const errorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+      if (!isAuthProviderUnavailable(response.status, errorData)) {
+        return { response, errorData };
+      }
+
+      response = await runFetch(false);
+      if (response.ok) {
+        return response;
+      }
+
+      const retryErrorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+      return { response, errorData: retryErrorData };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('La generazione sta impiegando troppo tempo. Timeout dopo 60 secondi.');
+      }
+      throw error;
     }
-
-    const errorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
-    if (!isAuthProviderUnavailable(response.status, errorData)) {
-      return { response, errorData };
-    }
-
-    response = await runFetch(false);
-    if (response.ok) {
-      return response;
-    }
-
-    const retryErrorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
-    return { response, errorData: retryErrorData };
   };
 
   const generateFromPayload = async (payload: Record<string, unknown>, token?: string | null) => {
