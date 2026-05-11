@@ -89,11 +89,11 @@ def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None
         return
 
     azp = str(claims.get("azp") or "").strip()
-    origin = request.headers.get("Origin", "").strip()
     if azp and azp in configured:
         return
-    if origin and origin in configured:
-        return
+
+    # We no longer check the Origin header here as it can be easily spoofed.
+    # We rely on the azp claim which is verified as part of the JWT signature.
     raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
 

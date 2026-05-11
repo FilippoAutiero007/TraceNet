@@ -132,8 +132,8 @@ async def generate_network(request: NormalizedNetworkRequest, http_request: Requ
 
         return GenerateResponse(
             success=True,
-            config_json=network_config,
-            subnets=subnets,
+            config_json=request,
+            subnets=[s.model_dump() for s in subnets],
             cli_script=cli_script,
         )
     except ValueError as exc:
@@ -368,9 +368,14 @@ async def analyze_pkt_file(
     _auth: AuthContext = Depends(require_pro_user),
 ):
     """Analyze an uploaded Packet Tracer file and return a Pro diagnostic report."""
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
+
+    # Check file size before reading into memory to prevent DoS
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds the 10MB limit.")
 
     pkt_data = await file.read()
     if not pkt_data:
