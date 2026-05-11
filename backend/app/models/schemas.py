@@ -29,7 +29,7 @@ class ParseIntent(str, Enum):
 
 class ParseNetworkRequest(BaseModel):
     """Request body for /api/parse-network-request endpoint"""
-    user_input: str = Field(..., min_length=1, description="User natural language input")
+    user_input: str = Field(..., min_length=1, max_length=2000, description="User natural language input")
     current_state: Dict[str, Any] = Field(
         default_factory=dict,
         description="Already collected conversation fields"
@@ -38,8 +38,8 @@ class ParseNetworkRequest(BaseModel):
 
 class NormalizedSubnet(BaseModel):
     """Normalized subnet entry used by backend generation."""
-    name: str = Field(..., min_length=1)
-    required_hosts: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1, max_length=64)
+    required_hosts: int = Field(..., ge=1, le=100000000)
     dns_server: Optional[str] = Field(default=None, description="Optional DNS server IP for this subnet")
 
 
@@ -94,8 +94,8 @@ class TopologyConfig(BaseModel):
 class VlanConfig(BaseModel):
     """Optional VLAN configuration for switches/router-on-a-stick (best-effort schema)."""
     id: int = Field(..., ge=1, le=4094, description="VLAN ID")
-    name: Optional[str] = Field(default=None, description="VLAN name")
-    subnet_name: Optional[str] = Field(default=None, description="Associated logical subnet name")
+    name: Optional[str] = Field(default=None, max_length=64, description="VLAN name")
+    subnet_name: Optional[str] = Field(default=None, max_length=64, description="Associated logical subnet name")
     native: bool = Field(default=False, description="Whether this VLAN is native on trunks")
 
     model_config = ConfigDict(extra="allow")
@@ -119,17 +119,17 @@ class AclRule(BaseModel):
 class AclConfig(BaseModel):
     """Optional ACL definition (best-effort schema)."""
     type: Literal["standard", "extended"] = Field(..., description="ACL type")
-    id: Optional[str] = Field(default=None, description="Standard ACL number (e.g. '10')")
-    name: Optional[str] = Field(default=None, description="Extended ACL name (e.g. 'BLOCK_WEB')")
-    rules: List[AclRule] = Field(default_factory=list)
+    id: Optional[str] = Field(default=None, max_length=16, description="Standard ACL number (e.g. '10')")
+    name: Optional[str] = Field(default=None, max_length=64, description="Extended ACL name (e.g. 'BLOCK_WEB')")
+    rules: List[AclRule] = Field(default_factory=list, max_length=100)
 
     model_config = ConfigDict(extra="allow")
 
 
 class ServerConfig(BaseModel):
-    services: List[str] = Field(default_factory=list)
-    hostname: str = Field(default="")
-    ftp_user: Optional[str] = Field(default=None)
+    services: List[str] = Field(default_factory=list, max_length=20)
+    hostname: str = Field(default="", max_length=64)
+    ftp_user: Optional[str] = Field(default=None, max_length=64)
     ftp_password: Optional[str] = Field(default=None)
     ftp_users: Optional[list] = Field(default=None)
     mail_users: Optional[list] = Field(default=None)
@@ -156,10 +156,10 @@ class PcConfig(BaseModel):
 class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
     base_network: str = Field(..., description="Base network in CIDR notation")
-    routers: int = Field(..., ge=1)
-    switches: int = Field(..., ge=0)
-    pcs: int = Field(..., ge=1)
-    servers: int = Field(default=0, ge=0)
+    routers: int = Field(..., ge=1, le=1000)
+    switches: int = Field(..., ge=0, le=1000)
+    pcs: int = Field(..., ge=1, le=10000)
+    servers: int = Field(default=0, ge=0, le=50)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     dhcp_from_router: bool = Field(default=False, description="Enable IOS DHCP pools on routers and set PCs as DHCP clients")
     dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
@@ -303,15 +303,15 @@ class RoutingProtocol(str, Enum):
 
 
 class SubnetRequest(BaseModel):
-    name: str = Field(..., min_length=1)
-    required_hosts: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1, max_length=64)
+    required_hosts: int = Field(..., ge=1, le=100000000)
     dns_server: Optional[str] = Field(default=None)
 
 
 class DeviceConfig(BaseModel):
-    routers: int = Field(..., ge=1)
-    switches: int = Field(..., ge=0)
-    pcs: int = Field(..., ge=1)
+    routers: int = Field(..., ge=1, le=1000)
+    switches: int = Field(..., ge=0, le=1000)
+    pcs: int = Field(..., ge=1, le=10000)
 
 
 class NetworkConfig(BaseModel):

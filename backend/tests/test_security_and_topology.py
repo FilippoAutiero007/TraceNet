@@ -95,4 +95,4 @@ async def test_generate_network_keeps_requested_base_prefix_when_subnets_are_omi
     assert response.success is True
     assert response.subnets is not None
     assert len(response.subnets) == 1
-    assert response.subnets[0].network == expected_network
+    assert response.subnets[0]["network"] == expected_network
