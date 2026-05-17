@@ -226,8 +226,8 @@ class ParseNetworkResponse(BaseModel):
 
 class GenerateResponse(BaseModel):
     success: bool
-    config_json: Optional[NormalizedNetworkRequest] = None
-    subnets: Optional[List[Dict[str, Any]]] = None
+    config_json: Optional[Union[NormalizedNetworkRequest, NetworkConfig]] = None
+    subnets: Optional[List[Union[SubnetResult, Dict[str, Any]]]] = None
     cli_script: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[str] = None
