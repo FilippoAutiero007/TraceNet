@@ -226,8 +226,8 @@ class ParseNetworkResponse(BaseModel):
 
 class GenerateResponse(BaseModel):
     success: bool
-    config_json: Optional[NormalizedNetworkRequest] = None
-    subnets: Optional[List[Dict[str, Any]]] = None
+    config_json: Optional[Union[NormalizedNetworkRequest, NetworkConfig]] = None
+    subnets: Optional[List[SubnetResult]] = None
     cli_script: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[str] = None
@@ -242,7 +242,7 @@ class PktGenerateResponse(BaseModel):
     pkt_download_url: Optional[str] = None
     xml_download_url: Optional[str] = None
     config_summary: Optional[Dict[str, Any]] = None
-    subnets: Optional[List[Dict[str, Any]]] = None
+    subnets: Optional[List[Union[SubnetResult, Dict[str, Any]]]] = None
     error: Optional[str] = None
     error_code: Optional[str] = None
     request_id: Optional[str] = None

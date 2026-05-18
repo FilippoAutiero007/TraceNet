@@ -372,7 +372,12 @@ async def analyze_pkt_file(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
-    pkt_data = await file.read()
+    # Enforcement of 10MB limit (DoS mitigation)
+    limit = 10 * 1024 * 1024
+    pkt_data = await file.read(limit + 1)
+    if len(pkt_data) > limit:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds 10MB limit.")
+
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
