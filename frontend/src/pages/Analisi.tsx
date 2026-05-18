@@ -8,7 +8,7 @@ import { Footer } from '@/sections/Footer';
 import { apiClient, type PktAnalysisResponse } from '@/lib/api';
 
 export function Analisi() {
-  const { isSignedIn, getToken } = useAuth();
+  const { getToken } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [exerciseText, setExerciseText] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -67,39 +67,6 @@ export function Analisi() {
     setError(null);
     setAnalysisResult(null);
   };
-
-  if (!isSignedIn) {
-    return (
-      <div className="min-h-screen">
-        <section className="relative py-24 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-12">
-              <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-6">
-                Analisi File .pkt
-              </h1>
-              <p className="text-xl text-slate-300 max-w-3xl mx-auto">
-                Carica un file Packet Tracer e ottieni una review tecnica dettagliata
-              </p>
-            </div>
-
-            <Card className="bg-slate-900/50 border-slate-800 p-8 text-center">
-              <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-4">
-                Funzione riservata al piano Pro
-              </h2>
-              <p className="text-slate-400 mb-6">
-                Il tuo piano attuale non include la correzione avanzata dei file Packet Tracer importati.
-              </p>
-              <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
-                Accedi o Registrati
-              </Button>
-            </Card>
-          </div>
-        </section>
-        <Footer />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen">
