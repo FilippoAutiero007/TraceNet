@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -39,21 +40,40 @@ async def _get_jwks_keys() -> list[dict[str, Any]]:
     if _JWKS_CACHE["keys"] and now < float(_JWKS_CACHE["expires_at"]):
         return _JWKS_CACHE["keys"]
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            response = await client.get(settings.clerk_jwks_url)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as exc:
-            raise api_error(503, "AUTH_PROVIDER_UNAVAILABLE", "Authentication service unavailable.") from exc
+    max_retries = 3
+    base_delay = 1.0
+    last_exc = None
 
-    keys = data.get("keys")
-    if not isinstance(keys, list) or not keys:
-        raise api_error(503, "AUTH_PROVIDER_UNAVAILABLE", "Authentication service unavailable.")
+    for attempt in range(max_retries):
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.get(settings.clerk_jwks_url)
+                response.raise_for_status()
+                data = response.json()
+            except (httpx.HTTPError, json.JSONDecodeError) as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
+                continue
 
-    _JWKS_CACHE["keys"] = keys
-    _JWKS_CACHE["expires_at"] = now + 300
-    return keys
+        keys = data.get("keys")
+        if not isinstance(keys, list) or not keys:
+            last_exc = ValueError("No valid keys in JWKS response")
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                await asyncio.sleep(delay)
+            continue
+
+        _JWKS_CACHE["keys"] = keys
+        _JWKS_CACHE["expires_at"] = now + 300
+        return keys
+
+    raise api_error(
+        503,
+        "AUTH_PROVIDER_UNAVAILABLE",
+        "Authentication service unavailable. Please try again in a moment.",
+    ) from last_exc
 
 
 def _extract_plan(claims: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
@@ -163,7 +183,16 @@ async def get_optional_auth_context(request: Request) -> Optional[AuthContext]:
 
 
 async def require_pro_user(request: Request) -> AuthContext:
-    auth = await verify_clerk_session_token(request)
+    try:
+        auth = await verify_clerk_session_token(request)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise api_error(
+                503,
+                "AUTH_SERVICE_TEMPORARILY_UNAVAILABLE",
+                "Servizio di autenticazione temporaneamente non disponibile. Riprova tra qualche secondo.",
+            ) from exc
+        raise
     if not auth.is_pro:
         raise api_error(403, "AUTH_PLAN_REQUIRED", "Pro plan required.")
     return auth

@@ -62,9 +62,37 @@ function buildAuthHeaders(token?: string | null): HeadersInit | undefined {
   return { Authorization: `Bearer ${token}` };
 }
 
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      if (response.status !== 503) {
+        return response;
+      }
+
+      lastError = new Error('Service temporarily unavailable');
+      const delay = 1000 * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const delay = 1000 * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError || new Error('Request failed after retries');
+}
+
 export const apiClient = {
   async parseNetworkRequest(userInput: string, currentState: Record<string, unknown> = {}, token?: string | null) {
-    const response = await fetch(`${API_BASE_URL}/api/parse-network-request`, {
+    const response = await fetchWithRetry(`${API_BASE_URL}/api/parse-network-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(buildAuthHeaders(token) || {}) },
       body: JSON.stringify({ user_input: userInput, current_state: currentState }),
@@ -79,7 +107,7 @@ export const apiClient = {
   },
 
   async generateNetwork(normalizedPayload: Record<string, unknown>, token?: string | null) {
-    const response = await fetch(`${API_BASE_URL}/api/generate-pkt`, {
+    const response = await fetchWithRetry(`${API_BASE_URL}/api/generate-pkt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(buildAuthHeaders(token) || {}) },
       body: JSON.stringify(normalizedPayload),
@@ -113,7 +141,7 @@ export const apiClient = {
       formData.append('exercise_text', options.exerciseText.trim());
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/analyze-pkt`, {
+    const response = await fetchWithRetry(`${API_BASE_URL}/api/analyze-pkt`, {
       method: 'POST',
       headers: buildAuthHeaders(options?.token),
       body: formData,

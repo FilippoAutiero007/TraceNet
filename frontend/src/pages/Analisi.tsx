@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@clerk/clerk-react';
 import { Footer } from '@/sections/Footer';
-import { apiClient, type PktAnalysisResponse } from '@/lib/api';
+import { apiClient, type PktAnalysisResponse, type UserCapabilitiesResponse } from '@/lib/api';
 
 export function Analisi() {
   const { getToken } = useAuth();
@@ -14,6 +14,26 @@ export function Analisi() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<PktAnalysisResponse | null>(null);
+  const [capabilities, setCapabilities] = useState<UserCapabilitiesResponse | null>(null);
+  const [isLoadingCapabilities, setIsLoadingCapabilities] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    loadCapabilities();
+  }, []);
+
+  const loadCapabilities = async () => {
+    setIsLoadingCapabilities(true);
+    try {
+      const token = await getToken();
+      const caps = await apiClient.getUserCapabilities(token);
+      setCapabilities(caps);
+    } catch {
+      setCapabilities(null);
+    } finally {
+      setIsLoadingCapabilities(false);
+    }
+  };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -36,6 +56,26 @@ export function Analisi() {
     event.preventDefault();
   };
 
+  const getErrorMessage = (err: unknown): string => {
+    if (err instanceof Error) {
+      const msg = err.message.toLowerCase();
+      if (msg.includes('service temporarily unavailable') || msg.includes('auth_service_temporarily_unavailable')) {
+        return 'Servizio di autenticazione temporaneamente non disponibile. Il server potrebbe essere in fase di avvio. Riprova tra qualche secondo.';
+      }
+      if (msg.includes('pro plan required')) {
+        return 'Questa funzionalità richiede un piano Pro.';
+      }
+      if (msg.includes('authentication required') || msg.includes('invalid authentication')) {
+        return 'Devi effettuare l\'accesso per utilizzare questa funzionalità.';
+      }
+      if (msg.includes('service unavailable') || msg.includes('503')) {
+        return 'Servizio temporaneamente non disponibile. Il backend potrebbe essere in fase di avvio. Riprova tra qualche secondo.';
+      }
+      return err.message;
+    }
+    return 'Analisi del file non riuscita.';
+  };
+
   const handleAnalyze = async () => {
     if (!selectedFile || isAnalyzing) return;
 
@@ -45,16 +85,24 @@ export function Analisi() {
 
     try {
       const token = await getToken();
+
+      if (!token) {
+        setError('Devi effettuare l\'accesso per analizzare un file.');
+        return;
+      }
+
       const result = await apiClient.analyzePktFile(selectedFile, {
         exerciseText,
         token,
       });
       setAnalysisResult(result);
+      setRetryCount(0);
     } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Analisi del file non riuscita.');
+      const message = getErrorMessage(err);
+      setError(message);
+
+      if (message.toLowerCase().includes('temporaneamente') || message.toLowerCase().includes('avvio')) {
+        setRetryCount((prev) => prev + 1);
       }
     } finally {
       setIsAnalyzing(false);
@@ -66,7 +114,88 @@ export function Analisi() {
     setExerciseText('');
     setError(null);
     setAnalysisResult(null);
+    setRetryCount(0);
   };
+
+  const isPro = capabilities?.can_use_pro_pkt_review ?? false;
+  const isAuthenticated = capabilities?.is_authenticated ?? false;
+
+  if (isLoadingCapabilities) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-cyan-400 mx-auto mb-4" />
+          <p className="text-slate-400">Caricamento...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen">
+        <section className="relative py-24 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-12">
+              <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-6">
+                Analisi File .pkt
+              </h1>
+              <p className="text-xl text-slate-300 max-w-3xl mx-auto">
+                Carica un file Packet Tracer e ottieni una review tecnica dettagliata
+              </p>
+            </div>
+
+            <Card className="bg-slate-900/50 border-slate-800 p-8 text-center">
+              <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-white mb-4">
+                Accesso richiesto
+              </h2>
+              <p className="text-slate-400 mb-6">
+                Devi effettuare l'accesso per utilizzare la correzione avanzata dei file Packet Tracer.
+              </p>
+              <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
+                Accedi o Registrati
+              </Button>
+            </Card>
+          </div>
+        </section>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (!isPro) {
+    return (
+      <div className="min-h-screen">
+        <section className="relative py-24 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-12">
+              <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-6">
+                Analisi File .pkt
+              </h1>
+              <p className="text-xl text-slate-300 max-w-3xl mx-auto">
+                Carica un file Packet Tracer e ottieni una review tecnica dettagliata
+              </p>
+            </div>
+
+            <Card className="bg-slate-900/50 border-slate-800 p-8 text-center">
+              <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-white mb-4">
+                Piano Pro richiesto
+              </h2>
+              <p className="text-slate-400 mb-6">
+                Il tuo piano attuale non include la correzione avanzata dei file Packet Tracer importati.
+              </p>
+              <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
+                Aggiorna al piano Pro
+              </Button>
+            </Card>
+          </div>
+        </section>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
@@ -159,9 +288,18 @@ export function Analisi() {
               {error && (
                 <div className="mt-4 flex items-start gap-3 bg-red-950/50 border border-red-900 rounded-lg p-4">
                   <XCircle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-red-200 font-medium text-sm">Errore</p>
+                  <div className="flex-1">
+                    <p className="text-red-200 font-medium text-sm mb-1">Errore</p>
                     <p className="text-red-300 text-sm">{error}</p>
+                    {retryCount > 0 && retryCount < 3 && (
+                      <button
+                        onClick={handleAnalyze}
+                        className="mt-2 flex items-center gap-1 text-cyan-400 hover:text-cyan-300 text-sm transition-colors"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Riprova ora
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
