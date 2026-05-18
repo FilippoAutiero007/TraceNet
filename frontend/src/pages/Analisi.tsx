@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileUp, CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX } from 'lucide-react';
+import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
