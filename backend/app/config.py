@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
     # API Keys
-    mistral_api_key: Optional[str] = Field(default=None, description="Mistral AI API key")
+    mistral_api_key: Optional[SecretStr] = Field(default=None, description="Mistral AI API key")
     clerk_jwks_url: str = Field(default="https://api.clerk.com/v1/jwks", description="Clerk JWKS endpoint")
     clerk_pro_plan_slugs: str = Field(
         default="professional,pro",
@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     def validate_runtime(self) -> dict:
         """Validate runtime configuration and return status."""
         checks = {
-            "mistral_api_key": bool(self.mistral_api_key),
+            "mistral_api_key": bool(self.mistral_api_key.get_secret_value()) if self.mistral_api_key else False,
             "output_dir_exists": self.output_dir.exists() if self.output_dir else False,
             "environment": self.environment,
         }
