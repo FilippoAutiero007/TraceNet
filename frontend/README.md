@@ -22,7 +22,6 @@ npm run dev
 
 ```env
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
-VITE_MISTRAL_API_KEY=...
 ```
 
 ## 🌐 Deploy
