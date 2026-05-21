@@ -1,8 +1,9 @@
 """Generate router - parser endpoint + deterministic PKT generation endpoints."""
 
-import os
-import logging
 import ipaddress
+import logging
+import os
+import re
 from time import perf_counter
 from threading import Lock
 
@@ -100,32 +101,231 @@ def _resolve_generation_subnets(
 
 
 def _build_pkt_network_config_dict(
-    request: NormalizedNetworkRequest,
-    subnets_input: list[SubnetRequest],
-    protocol_value: str,
+    plan: dict[str, object],
 ) -> dict:
     return {
-        "base_network": request.base_network,
-        "subnets": [s.model_dump() for s in subnets_input],
+        "base_network": plan["base_network"],
+        "subnets": [s.model_dump() for s in plan["subnets_input"]],
         "devices": {
-            "routers": request.routers,
-            "switches": request.switches,
-            "pcs": request.pcs,
-            "servers": getattr(request, "servers", 0),
+            "routers": plan["routers"],
+            "switches": plan["switches"],
+            "pcs": plan["pcs"],
+            "servers": plan["servers"],
         },
-        "routing_protocol": protocol_value,
-        "dhcp_from_router": getattr(request, "dhcp_from_router", False),
-        "dhcp_dns": getattr(request, "dhcp_dns", None),
-        "server_services": request.server_services or [],
-        "servers_config": [s.model_dump() for s in request.servers_config] if request.servers_config else [],
-        "network_sites": [s.model_dump() for s in getattr(request, "network_sites", []) or []],
-        "requirements": list(getattr(request, "requirements", []) or []),
-        "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
-        "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
-        "acl": [a.model_dump() for a in getattr(request, "acl", []) or []],
+        "routing_protocol": plan["routing_protocol_output"],
+        "dhcp_from_router": plan["dhcp_from_router"],
+        "dhcp_dns": plan["dhcp_dns"],
+        "server_services": plan["server_services"],
+        "servers_config": plan["servers_config"],
+        "network_sites": plan["network_sites"],
+        "requirements": plan["requirements"],
+        "vlans": plan["vlans"],
+        "nat": plan["nat"],
+        "acl": plan["acl"],
+        "pcs_config": plan["pcs_config"],
         "XML_VERSION": "8.2.2.0400",
-        "topology": request.topology.model_dump() if request.topology else None,
+        "topology": plan["topology"],
         "dns_records": [],
+    }
+
+
+def _requirement_flag(requirements: list[str], pattern: str) -> bool:
+    return any(re.search(pattern, requirement, re.IGNORECASE) for requirement in requirements)
+
+
+def _normalize_site_slug(name: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "_", name.strip().upper()).strip("_") or "SITE"
+
+
+def _derive_site_subnets(
+    base_network: str,
+    network_sites: list[dict[str, object]],
+    requirements: list[str],
+    subnet_hints: dict[str, int],
+) -> list[SubnetRequest]:
+    if not network_sites:
+        return []
+
+    derived: list[SubnetRequest] = []
+    supplemental_pool = ipaddress.ip_network("10.255.250.0/24")
+    supplemental_iter = supplemental_pool.subnets(new_prefix=29)
+    needs_bologna_split = _requirement_flag(requirements, r"marketing") or _requirement_flag(requirements, r"technical|tecnic")
+
+    for site in network_sites:
+        site_name = str(site.get("name", "")).strip() or "Site"
+        slug = _normalize_site_slug(site_name)
+        site_cidr = str(site.get("base_network", "") or "").strip()
+        site_network = ipaddress.ip_network(site_cidr, strict=False) if site_cidr else None
+
+        if slug == "BOLOGNA" and site_network is not None and needs_bologna_split and site_network.prefixlen <= 24:
+            split_prefix = min(max(site_network.prefixlen + 2, 26), 28)
+            split_networks = list(site_network.subnets(new_prefix=split_prefix))
+            labels = ["TECH_FLOOR1", "TECH_FLOOR2", "MARKETING", "SERVERS"]
+            for idx, label in enumerate(labels):
+                if idx >= len(split_networks):
+                    break
+                derived.append(
+                    SubnetRequest(
+                        name=f"{slug}_{label}",
+                        network=str(split_networks[idx]),
+                        site=site_name,
+                    )
+                )
+            continue
+
+        if site_network is None:
+            site_network = next(supplemental_iter)
+        elif site_network.prefixlen < 24:
+            site_network = next(site_network.subnets(new_prefix=24))
+
+        derived.append(
+            SubnetRequest(
+                name=f"{slug}_{'REMOTE' if slug == 'MONDRAGONE' else 'LAN'}",
+                network=str(site_network),
+                site=site_name,
+            )
+        )
+
+    if not derived:
+        return []
+
+    if not any("MARKETING" in subnet.name for subnet in derived) and "MARKETING" in subnet_hints:
+        derived.append(
+            SubnetRequest(
+                name="MARKETING",
+                required_hosts=subnet_hints["MARKETING"],
+            )
+        )
+
+    return derived
+
+
+def _assign_server_subnets(servers_config: list[dict[str, object]], derived_subnets: list[SubnetRequest]) -> list[dict[str, object]]:
+    subnet_names = {subnet.name: subnet for subnet in derived_subnets}
+    bologna_servers = next((subnet.name for subnet in derived_subnets if subnet.name.endswith("_SERVERS")), None)
+    firenze_dc = next((subnet.name for subnet in derived_subnets if subnet.name.startswith("FIRENZE")), None)
+    marketing = next((subnet.name for subnet in derived_subnets if "MARKETING" in subnet.name), None)
+
+    enriched: list[dict[str, object]] = []
+    for server in servers_config:
+        updated = dict(server)
+        services = {str(service).strip().lower() for service in updated.get("services", [])}
+        if updated.get("subnet_name") in subnet_names:
+            enriched.append(updated)
+            continue
+        if "dhcp" in services and marketing:
+            updated["subnet_name"] = marketing
+            updated["site"] = "Bologna"
+        elif {"dns", "http", "web"}.intersection(services) and firenze_dc:
+            updated["subnet_name"] = firenze_dc
+            updated["site"] = "Firenze"
+        elif {"email", "smtp", "pop3"}.intersection(services):
+            updated["subnet_name"] = bologna_servers or firenze_dc
+            updated["site"] = "Bologna" if bologna_servers else "Firenze"
+        enriched.append(updated)
+    return enriched
+
+
+def _build_semantic_pcs_config(
+    total_pcs: int,
+    derived_subnets: list[SubnetRequest],
+    original_hints: dict[str, int],
+) -> list[dict[str, object]]:
+    if total_pcs <= 0 or not derived_subnets:
+        return []
+
+    pcs_config: list[dict[str, object]] = []
+    marketing_subnet = next((subnet.name for subnet in derived_subnets if "MARKETING" in subnet.name), None)
+    mondragone_subnet = next((subnet.name for subnet in derived_subnets if "MONDRAGONE" in subnet.name), None)
+    tech_subnets = [subnet.name for subnet in derived_subnets if "TECH" in subnet.name]
+
+    marketing_count = min(original_hints.get("MARKETING", 0), total_pcs) if marketing_subnet else 0
+    mondragone_count = min(original_hints.get("MONDRAGONE", 0), max(0, total_pcs - marketing_count)) if mondragone_subnet else 0
+
+    for _ in range(marketing_count):
+        pcs_config.append({"subnet_name": marketing_subnet})
+    for _ in range(mondragone_count):
+        pcs_config.append({"subnet_name": mondragone_subnet})
+
+    remaining = total_pcs - len(pcs_config)
+    fallback_subnets = tech_subnets or [subnet.name for subnet in derived_subnets]
+    for idx in range(remaining):
+        pcs_config.append({"subnet_name": fallback_subnets[idx % len(fallback_subnets)]})
+    return pcs_config
+
+
+def _build_generation_plan(request: NormalizedNetworkRequest | ManualNetworkRequest) -> dict[str, object]:
+    subnets_input = list(request.subnets or [])
+    subnet_hints: dict[str, int] = {}
+    for subnet in subnets_input:
+        subnet_name = str(getattr(subnet, "name", "")).strip().upper()
+        required_hosts = getattr(subnet, "required_hosts", None)
+        if subnet_name and isinstance(required_hosts, int):
+            subnet_hints[subnet_name] = required_hosts
+
+    requirements = [str(item) for item in (getattr(request, "requirements", []) or [])]
+    network_sites = [site.model_dump() if hasattr(site, "model_dump") else dict(site) for site in (getattr(request, "network_sites", []) or [])]
+    servers_config = [cfg.model_dump() if hasattr(cfg, "model_dump") else dict(cfg) for cfg in (getattr(request, "servers_config", []) or [])]
+    pcs_config = [cfg.model_dump() if hasattr(cfg, "model_dump") else dict(cfg) for cfg in (getattr(request, "pcs_config", []) or [])]
+    server_services = list(getattr(request, "server_services", []) or [])
+    vlans = [cfg.model_dump() if hasattr(cfg, "model_dump") else dict(cfg) for cfg in (getattr(request, "vlans", []) or [])]
+    acl = [cfg.model_dump() if hasattr(cfg, "model_dump") else dict(cfg) for cfg in (getattr(request, "acl", []) or [])]
+    nat = getattr(request, "nat", None)
+    nat_dict = nat.model_dump() if hasattr(nat, "model_dump") else nat
+    topology = getattr(request, "topology", None)
+    topology_dict = topology.model_dump() if hasattr(topology, "model_dump") else topology
+
+    derived_subnets = subnets_input
+    if not derived_subnets and network_sites:
+        derived_subnets = _derive_site_subnets(request.base_network, network_sites, requirements, subnet_hints)
+    if not derived_subnets:
+        derived_subnets = [_default_subnet_for_base(request.base_network)]
+
+    if isinstance(request, ManualNetworkRequest):
+        routers_count = int(request.devices.routers)
+        switches_count = int(request.devices.switches)
+        pcs_count = int(request.devices.pcs)
+        servers_count = int(getattr(request.devices, "servers", 0) or 0)
+        routing_protocol_value = request.routing_protocol.value
+    else:
+        routers_count = int(request.routers)
+        switches_count = int(request.switches)
+        pcs_count = int(request.pcs)
+        servers_count = int(getattr(request, "servers", 0) or 0)
+        routing_protocol_value = str(request.routing_protocol)
+
+    if servers_config:
+        servers_config = _assign_server_subnets(servers_config, derived_subnets)
+    if not pcs_config:
+        pcs_config = _build_semantic_pcs_config(pcs_count, derived_subnets, subnet_hints)
+
+    routers = max(routers_count, len(network_sites) or routers_count)
+    switches = max(switches_count, len(derived_subnets) or switches_count)
+    servers = max(servers_count, len(servers_config), len(server_services))
+
+    if nat_dict is None and _requirement_flag(requirements, r"nat/pat|nat"):
+        nat_dict = {"type": "pat", "acl": "10"}
+
+    return {
+        "base_network": request.base_network,
+        "subnets_input": derived_subnets,
+        "routers": routers,
+        "switches": switches,
+        "pcs": pcs_count,
+        "servers": servers,
+        "routing_protocol": routing_protocol_value,
+        "routing_protocol_output": "static" if str(routing_protocol_value).upper() == "STATIC" else str(routing_protocol_value),
+        "dhcp_from_router": bool(getattr(request, "dhcp_from_router", False)),
+        "dhcp_dns": getattr(request, "dhcp_dns", None),
+        "server_services": server_services,
+        "servers_config": servers_config,
+        "pcs_config": pcs_config,
+        "network_sites": network_sites,
+        "requirements": requirements,
+        "vlans": vlans,
+        "nat": nat_dict,
+        "acl": acl,
+        "topology": topology_dict,
     }
 
 
@@ -166,15 +366,16 @@ async def parse_network_endpoint(request: ParseNetworkRequest):
 async def generate_network(request: NormalizedNetworkRequest, http_request: Request):
     """Generate CLI configuration from normalized JSON only."""
     try:
+        plan = _build_generation_plan(request)
         # Ensure protocol normalization stays consistent with schema expectations.
-        protocol = request.routing_protocol.strip().upper()
-        subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
+        protocol = str(plan["routing_protocol"]).strip().upper()
+        subnets_input = plan["subnets_input"]
         network_config = NetworkConfig(
-            base_network=request.base_network,
+            base_network=str(plan["base_network"]),
             subnets=subnets_input,
-            devices=DeviceConfig(routers=request.routers, switches=request.switches, pcs=request.pcs),
+            devices=DeviceConfig(routers=int(plan["routers"]), switches=int(plan["switches"]), pcs=int(plan["pcs"])),
             routing_protocol=RoutingProtocol(protocol if protocol != "STATIC" else "static"),
-            dhcp_dns=request.dhcp_dns,
+            dhcp_dns=plan["dhcp_dns"],
         )
 
         subnets = _resolve_generation_subnets(network_config.base_network, network_config.subnets)
@@ -215,14 +416,14 @@ async def generate_pkt_file(
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
     started_at = perf_counter()
     try:
+        plan = _build_generation_plan(request)
         consume_generation_quota(auth, http_request)
         after_quota = perf_counter()
-        subnets_input = request.subnets or [_default_subnet_for_base(request.base_network)]
-        protocol_value = "static" if request.routing_protocol == "STATIC" else request.routing_protocol
+        subnets_input = plan["subnets_input"]
 
-        network_config_dict = _build_pkt_network_config_dict(request, subnets_input, protocol_value)
+        network_config_dict = _build_pkt_network_config_dict(plan)
 
-        subnets = _resolve_generation_subnets(request.base_network, subnets_input)
+        subnets = _resolve_generation_subnets(str(plan["base_network"]), subnets_input)
         after_vlsm = perf_counter()
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
@@ -258,9 +459,9 @@ async def generate_pkt_file(
                 "quota_ms": round((after_quota - started_at) * 1000, 2),
                 "vlsm_ms": round((after_vlsm - after_quota) * 1000, 2),
                 "pkt_generation_ms": round((after_generation - after_vlsm) * 1000, 2),
-                "routers": request.routers,
-                "switches": request.switches,
-                "pcs": request.pcs,
+                "routers": plan["routers"],
+                "switches": plan["switches"],
+                "pcs": plan["pcs"],
                 "subnets_count": len(subnets),
                 "encoding_used": result.get("encoding_used"),
             },
@@ -274,12 +475,12 @@ async def generate_pkt_file(
             pkt_download_url=f"/api/download/{pkt_filename}",
             xml_download_url=f"/api/download/{xml_filename}",
             config_summary={
-                "base_network": request.base_network,
+                "base_network": plan["base_network"],
                 "subnets_count": len(subnets),
-                "routers": request.routers,
-                "switches": request.switches,
-                "pcs": request.pcs,
-                "routing_protocol": protocol_value,
+                "routers": plan["routers"],
+                "switches": plan["switches"],
+                "pcs": plan["pcs"],
+                "routing_protocol": plan["routing_protocol_output"],
             },
             subnets=[
                 {
@@ -319,27 +520,12 @@ async def generate_pkt_file_manual(
 ):
     """Generate Cisco Packet Tracer .pkt file from structured parameters."""
     try:
+        plan = _build_generation_plan(request)
         consume_generation_quota(auth, http_request)
-        subnets = _resolve_generation_subnets(request.base_network, request.subnets)
+        subnets = _resolve_generation_subnets(str(plan["base_network"]), plan["subnets_input"])
 
-        network_config_dict = {
-            "base_network": request.base_network,
-            "subnets": [s.model_dump() for s in request.subnets],
-            "devices": request.devices.model_dump(),
-            "routing_protocol": request.routing_protocol.value,
-            "dhcp_from_router": bool(getattr(request, "dhcp_from_router", False)),
-            "dhcp_dns": getattr(request, "dhcp_dns", None),
-            "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
-            "XML_VERSION": "8.2.2.0400",
-            "topology": request.topology.model_dump() if request.topology else None,
-            "dns_records": request.dns_records or [],
-            "server_services": request.server_services or [],
-            "servers_config": [s.model_dump() for s in (request.servers_config or [])],
-            "network_sites": [s.model_dump() for s in (request.network_sites or [])],
-            "vlans": [v.model_dump() for v in (request.vlans or [])],
-            "acl": [a.model_dump() for a in (request.acl or [])],
-            "pcs_config": [p.model_dump() for p in (request.pcs_config or [])],
-        }
+        network_config_dict = _build_pkt_network_config_dict(plan)
+        network_config_dict["dns_records"] = request.dns_records or []
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
@@ -374,12 +560,12 @@ async def generate_pkt_file_manual(
             pkt_download_url=f"/api/download/{pkt_filename}",
             xml_download_url=f"/api/download/{xml_filename}",
             config_summary={
-                "base_network": request.base_network,
+                "base_network": plan["base_network"],
                 "subnets_count": len(subnets),
-                "routers": request.devices.routers,
-                "switches": request.devices.switches,
-                "pcs": request.devices.pcs,
-                "routing_protocol": request.routing_protocol.value,
+                "routers": plan["routers"],
+                "switches": plan["switches"],
+                "pcs": plan["pcs"],
+                "routing_protocol": plan["routing_protocol_output"],
             },
             subnets=[
                 {

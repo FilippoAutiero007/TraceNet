@@ -28,6 +28,7 @@ def build_lan_segments(subnets: list[Any], dhcp_dns: Any) -> list[dict[str, Any]
             {
                 "name": str(getattr(subnet, "name", "")),
                 "network": str(getattr(subnet, "network", "")),
+                "site": str(getattr(subnet, "site", "") or ""),
                 "mask": mask,
                 "gateway": str(gw_ip),
                 "dns_server": dhcp_dns if dhcp_dns else getattr(subnet, "dns_server", None),
@@ -175,6 +176,8 @@ def assign_router_lan_interfaces(
                     mask=current_seg["mask"],
                     role="lan",
                     dns_server=current_seg.get("dns_server"),
+                    subnet_name=current_seg.get("name"),
+                    site=current_seg.get("site"),
                     encapsulation=f"dot1Q {vlan_id}",
                     vlan_id=vlan_id,
                 )
@@ -187,6 +190,8 @@ def assign_router_lan_interfaces(
             mask=seg["mask"],
             role="lan",
             dns_server=seg.get("dns_server"),
+            subnet_name=seg.get("name"),
+            site=seg.get("site"),
         )
 
 
@@ -249,6 +254,7 @@ def attach_acl_to_router_interfaces(
                 continue
 
             apply_to_interface = str(acl.get("apply_to_interface", "")).strip()
+            apply_to_subnet_name = str(acl.get("apply_to_subnet_name", "")).strip().upper()
             raw_vlan = acl.get("apply_to_vlan", acl.get("vlan_id"))
             try:
                 apply_to_vlan = int(raw_vlan) if raw_vlan is not None else None
@@ -266,10 +272,14 @@ def attach_acl_to_router_interfaces(
             for iface in interfaces:
                 iface_name = str(iface.get("name", "")).strip()
                 iface_vlan = iface.get("vlan_id")
+                iface_subnet_name = str(iface.get("subnet_name", "")).strip().upper()
                 if apply_to_interface and iface_name == apply_to_interface:
                     iface["acl"] = acl_ref
                     break
                 if apply_to_vlan is not None and iface_vlan == apply_to_vlan:
+                    iface["acl"] = acl_ref
+                    break
+                if apply_to_subnet_name and iface_subnet_name == apply_to_subnet_name:
                     iface["acl"] = acl_ref
                     break
 
@@ -332,6 +342,24 @@ def segment_for_host(
             vlan_id = None
         if vlan_id is not None and vlan_id in segment_by_vlan_id:
             return segment_by_vlan_id[vlan_id]
+
+    explicit_subnet_name = str(explicit_cfg.get("subnet_name", "")).strip().upper()
+    if explicit_subnet_name:
+        for segment in segments:
+            if str(segment.get("name", "")).strip().upper() == explicit_subnet_name:
+                return segment
+
+    explicit_site = str(explicit_cfg.get("site", "")).strip().upper()
+    if explicit_site:
+        for segment in segments:
+            if str(segment.get("site", "")).strip().upper() == explicit_site:
+                return segment
+
+    explicit_network = str(explicit_cfg.get("network", "")).strip()
+    if explicit_network:
+        for segment in segments:
+            if str(segment.get("network", "")).strip() == explicit_network:
+                return segment
 
     return segments[fallback_index % len(segments)]
 

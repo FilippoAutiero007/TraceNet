@@ -205,6 +205,67 @@ def test_generate_pkt_manual_accepts_explicit_subnets_on_multiple_base_networks(
     assert captured["config"]["network_sites"][0]["public_ip"] == "82.15.44.10"
 
 
+def test_generate_pkt_semantic_plan_expands_multi_site_requirements(monkeypatch):
+    captured = {}
+
+    def _fake_save_pkt_file(subnets, config, output_dir):
+        captured["subnets"] = subnets
+        captured["config"] = config
+        return {
+            "success": True,
+            "pkt_path": "/tmp/tracenet/semantic.pkt",
+            "xml_path": "/tmp/tracenet/semantic.xml",
+            "encoding_used": "template_based",
+            "file_size": 123,
+        }
+
+    monkeypatch.setattr("app.routers.generate.save_pkt_file", _fake_save_pkt_file)
+
+    response = client.post(
+        "/api/generate-pkt",
+        json={
+            "base_network": "192.168.1.0/24",
+            "routers": 1,
+            "switches": 1,
+            "pcs": 8,
+            "servers": 4,
+            "routing_protocol": "STATIC",
+            "network_sites": [
+                {"name": "Bologna", "base_network": "192.168.1.0/24", "public_ip": "82.15.44.10"},
+                {"name": "Firenze", "base_network": "172.16.0.0/16"},
+                {"name": "Mondragone", "public_ip": "1.117.170.23"},
+            ],
+            "servers_config": [
+                {"services": ["dhcp"], "hostname": "marketing-dhcp.local"},
+                {"services": ["dns"], "hostname": "dns.horizon.local"},
+                {"services": ["http"], "hostname": "web.horizon.local"},
+                {"services": ["email"], "hostname": "mail.horizon.local"},
+            ],
+            "requirements": [
+                "Enable NAT/PAT",
+                "Block Marketing to Technical office communication",
+                "Allow Mondragone access only to the mail server",
+                "Block Technical office access to the web server",
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert captured["config"]["devices"]["routers"] >= 3
+    assert captured["config"]["devices"]["switches"] >= 5
+    assert captured["config"]["nat"]["type"] == "pat"
+    subnet_names = [subnet["name"] for subnet in captured["config"]["subnets"]]
+    assert "BOLOGNA_TECH_FLOOR1" in subnet_names
+    assert "BOLOGNA_MARKETING" in subnet_names
+    assert "FIRENZE_LAN" in subnet_names
+    assert any(name.startswith("MONDRAGONE") for name in subnet_names)
+    server_subnets = {srv["hostname"]: srv.get("subnet_name") for srv in captured["config"]["servers_config"]}
+    assert server_subnets["marketing-dhcp.local"] == "BOLOGNA_MARKETING"
+    assert server_subnets["web.horizon.local"] == "FIRENZE_LAN"
+    assert server_subnets["mail.horizon.local"] == "BOLOGNA_SERVERS"
+
+
 def test_generate_pkt_tolerates_optional_auth_provider_unavailable(monkeypatch):
     def _fake_save_pkt_file(subnets, config, output_dir):
         return {

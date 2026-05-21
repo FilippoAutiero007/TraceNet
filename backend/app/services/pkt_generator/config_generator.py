@@ -496,6 +496,12 @@ def generate_router_config(
             outside_iface = str(nat.get("outside_interface", "")).strip() or "FastEthernet0/1"
             if inside_net and inside_wc:
                 commands.append(f"access-list {acl_id} permit {inside_net} {inside_wc}")
+            else:
+                for net in _iter_unique_interface_networks(dev_cfg):
+                    wildcard = ipaddress.IPv4Address(
+                        int(ipaddress.IPv4Address("255.255.255.255")) - int(net.netmask)
+                    )
+                    commands.append(f"access-list {acl_id} permit {net.network_address} {wildcard}")
             commands.append(f"ip nat inside source list {acl_id} interface {outside_iface} overload")
             commands.append("!")
 

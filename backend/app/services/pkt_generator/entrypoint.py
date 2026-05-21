@@ -42,6 +42,148 @@ from .server_services import has_service, normalize_services
 logger = logging.getLogger(__name__)
 
 
+def _network_and_wildcard(ip_text: str, mask_text: str) -> tuple[str, str] | None:
+    try:
+        iface = ipaddress.IPv4Interface(f"{ip_text}/{mask_text}")
+    except Exception:
+        return None
+    wildcard = ipaddress.IPv4Address(
+        int(ipaddress.IPv4Address("255.255.255.255")) - int(iface.network.netmask)
+    )
+    return str(iface.network.network_address), str(wildcard)
+
+
+def _mark_nat_roles(routers_config: list[dict[str, Any]]) -> None:
+    for router_cfg in routers_config:
+        interfaces = router_cfg.get("interfaces") or []
+        wan_ifaces = [iface for iface in interfaces if str(iface.get("role", "")).lower() == "wan"]
+        lan_ifaces = [iface for iface in interfaces if str(iface.get("role", "")).lower() == "lan"]
+        if not wan_ifaces or not lan_ifaces:
+            continue
+        outside_iface = str(wan_ifaces[0].get("name", "")).strip()
+        nat_cfg = router_cfg.get("nat") or {}
+        if isinstance(nat_cfg, dict):
+            nat_cfg = dict(nat_cfg)
+            nat_cfg.setdefault("type", "pat")
+            nat_cfg.setdefault("acl", "10")
+            nat_cfg.setdefault("outside_interface", outside_iface)
+            router_cfg["nat"] = nat_cfg
+        for iface in wan_ifaces:
+            iface["nat"] = "outside"
+        for iface in lan_ifaces:
+            iface["nat"] = "inside"
+
+
+def _build_requirement_acls(
+    requirements: list[str],
+    devices_config: list[dict[str, Any]],
+    routers_config: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not requirements:
+        return []
+
+    subnet_index: dict[str, tuple[str, str]] = {}
+    for router_cfg in routers_config:
+        for iface in router_cfg.get("interfaces") or []:
+            subnet_name = str(iface.get("subnet_name", "")).strip().upper()
+            role = str(iface.get("role", "")).strip().lower()
+            if not subnet_name or role != "lan":
+                continue
+            resolved = _network_and_wildcard(str(iface.get("ip", "")), str(iface.get("mask", "")))
+            if resolved is None:
+                continue
+            subnet_index[subnet_name] = resolved
+
+    hostname_to_ip: dict[str, str] = {}
+    for dev in devices_config:
+        hostname = str(dev.get("hostname", "")).strip().lower()
+        ip_addr = str(dev.get("ip", "")).strip()
+        if hostname and ip_addr:
+            hostname_to_ip[hostname] = ip_addr
+
+    requirement_acls: list[dict[str, Any]] = []
+
+    if any("marketing" in req.lower() and "technical" in req.lower() for req in requirements):
+        marketing = next((name for name in subnet_index if "MARKETING" in name), None)
+        technical = [name for name in subnet_index if "TECH" in name]
+        if marketing and technical:
+            rules = []
+            src_net, src_wc = subnet_index[marketing]
+            for tech in technical:
+                dst_net, dst_wc = subnet_index[tech]
+                rules.append(
+                    {
+                        "action": "deny",
+                        "protocol": "ip",
+                        "src_network": src_net,
+                        "src_mask": src_wc,
+                        "dst_network": dst_net,
+                        "dst_mask": dst_wc,
+                    }
+                )
+            rules.append({"action": "permit", "protocol": "ip", "src_any": True, "dst_any": True})
+            requirement_acls.append(
+                {
+                    "type": "extended",
+                    "name": "BLOCK_MARKETING_TO_TECH",
+                    "apply_to_subnet_name": marketing,
+                    "direction": "in",
+                    "rules": rules,
+                }
+            )
+
+    if any("technical" in req.lower() and "web server" in req.lower() for req in requirements):
+        web_ip = hostname_to_ip.get("web.horizon.local")
+        technical = [name for name in subnet_index if "TECH" in name]
+        if web_ip and technical:
+            for tech in technical:
+                src_net, src_wc = subnet_index[tech]
+                requirement_acls.append(
+                    {
+                        "type": "extended",
+                        "name": f"BLOCK_{tech}_WEB",
+                        "apply_to_subnet_name": tech,
+                        "direction": "in",
+                        "rules": [
+                            {
+                                "action": "deny",
+                                "protocol": "ip",
+                                "src_network": src_net,
+                                "src_mask": src_wc,
+                                "dst_host": web_ip,
+                            },
+                            {"action": "permit", "protocol": "ip", "src_any": True, "dst_any": True},
+                        ],
+                    }
+                )
+
+    if any("mondragone" in req.lower() and "mail server" in req.lower() for req in requirements):
+        mondragone = next((name for name in subnet_index if "MONDRAGONE" in name), None)
+        mail_ip = hostname_to_ip.get("mail.horizon.local")
+        if mondragone and mail_ip:
+            src_net, src_wc = subnet_index[mondragone]
+            requirement_acls.append(
+                {
+                    "type": "extended",
+                    "name": "MONDRAGONE_MAIL_ONLY",
+                    "apply_to_subnet_name": mondragone,
+                    "direction": "in",
+                    "rules": [
+                        {
+                            "action": "permit",
+                            "protocol": "ip",
+                            "src_network": src_net,
+                            "src_mask": src_wc,
+                            "dst_host": mail_ip,
+                        },
+                        {"action": "deny", "protocol": "ip", "src_any": True, "dst_any": True},
+                    ],
+                }
+            )
+
+    return requirement_acls
+
+
 def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dict[str, Any]:
     logger.info("Generating PKT file with template-based approach")
 
@@ -97,6 +239,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         vlans_global = list(config.get("vlans") or [])
         nat_global = config.get("nat")
         acl_global = list(config.get("acl") or [])
+        requirements = [str(item) for item in (config.get("requirements") or [])]
 
         # Count ports used by each router
         router_port_count: dict[str, int] = defaultdict(int)
@@ -182,8 +325,6 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
             wan_network_str=str(wan_network_str),
             wan_prefix=int(topology_cfg.get("wan_prefix", 30)),
         )
-
-        attach_acl_to_router_interfaces(routers_config, acl_global)
 
         # 3) Host (PC/Server) address allocation by switch LAN; PCs become DHCP clients if requested.
         link_to_switch, link_to_switch_port = collect_host_switch_links(links_config)
@@ -469,6 +610,15 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
 
             devices_config.append(pc_cfg)
             pc_idx += 1
+
+        _mark_nat_roles(routers_config)
+        requirement_acls = _build_requirement_acls(requirements, devices_config, routers_config)
+        if requirement_acls:
+            acl_global.extend(requirement_acls)
+            for router_cfg in routers_config:
+                router_cfg["acl"] = acl_global
+
+        attach_acl_to_router_interfaces(routers_config, acl_global)
 
 
         # 4) Switch VLAN port roles (best-effort; trunks only if VLANs are provided).

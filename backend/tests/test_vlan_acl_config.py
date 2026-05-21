@@ -8,11 +8,13 @@ from app.services.pkt_generator.config_generator import generate_router_config, 
 
 
 class MockSubnet:
-    def __init__(self, name: str, mask: str, usable_range: list[str], gateway: str):
+    def __init__(self, name: str, mask: str, usable_range: list[str], gateway: str, network: str = "", site: str = ""):
         self.name = name
         self.mask = mask
         self.usable_range = usable_range
         self.gateway = gateway
+        self.network = network
+        self.site = site
 
 
 def _find_device(root: ET.Element, name: str) -> ET.Element | None:
@@ -327,3 +329,58 @@ def test_save_pkt_file_applies_acl_to_explicit_interface_and_keeps_vlan_trunks(t
     assert "interface FastEthernet0/0.40" in router_joined
     assert "switchport trunk native vlan 40" in switch_joined
     assert "switchport trunk allowed vlan 30,40" in switch_joined
+
+
+def test_save_pkt_file_generates_semantic_requirement_acls_and_nat(tmp_path, monkeypatch):
+    template_path = Path(__file__).resolve().parent.parent / "templates" / "simple_ref.pkt"
+    monkeypatch.setenv("PKT_TEMPLATE_PATH", str(template_path))
+
+    subnets = [
+        MockSubnet("BOLOGNA_TECH_FLOOR1", "255.255.255.192", ["192.168.1.2", "192.168.1.62"], gateway="192.168.1.1", network="192.168.1.0/26", site="Bologna"),
+        MockSubnet("BOLOGNA_TECH_FLOOR2", "255.255.255.192", ["192.168.1.66", "192.168.1.126"], gateway="192.168.1.65", network="192.168.1.64/26", site="Bologna"),
+        MockSubnet("BOLOGNA_MARKETING", "255.255.255.192", ["192.168.1.130", "192.168.1.190"], gateway="192.168.1.129", network="192.168.1.128/26", site="Bologna"),
+        MockSubnet("BOLOGNA_SERVERS", "255.255.255.192", ["192.168.1.194", "192.168.1.254"], gateway="192.168.1.193", network="192.168.1.192/26", site="Bologna"),
+        MockSubnet("MONDRAGONE_REMOTE", "255.255.255.248", ["10.255.250.2", "10.255.250.6"], gateway="10.255.250.1", network="10.255.250.0/29", site="Mondragone"),
+    ]
+    config = {
+        "devices": {"routers": 3, "switches": 5, "pcs": 8, "servers": 4},
+        "routing_protocol": "static",
+        "nat": {"type": "pat"},
+        "requirements": [
+            "Block Marketing to Technical office communication",
+            "Allow Mondragone access only to the mail server",
+            "Block Technical office access to the web server",
+        ],
+        "servers_config": [
+            {"services": ["dhcp"], "hostname": "marketing-dhcp.local", "subnet_name": "BOLOGNA_MARKETING"},
+            {"services": ["dns"], "hostname": "dns.horizon.local", "subnet_name": "BOLOGNA_SERVERS"},
+            {"services": ["http"], "hostname": "web.horizon.local", "subnet_name": "BOLOGNA_SERVERS"},
+            {"services": ["email"], "hostname": "mail.horizon.local", "subnet_name": "BOLOGNA_SERVERS"},
+        ],
+        "pcs_config": [
+            {"subnet_name": "BOLOGNA_MARKETING"},
+            {"subnet_name": "BOLOGNA_MARKETING"},
+            {"subnet_name": "BOLOGNA_MARKETING"},
+            {"subnet_name": "BOLOGNA_MARKETING"},
+            {"subnet_name": "BOLOGNA_MARKETING"},
+            {"subnet_name": "MONDRAGONE_REMOTE"},
+            {"subnet_name": "MONDRAGONE_REMOTE"},
+            {"subnet_name": "MONDRAGONE_REMOTE"},
+        ],
+    }
+
+    result = save_pkt_file(subnets, config, str(tmp_path))
+    assert result["success"] is True
+
+    root = ET.fromstring(Path(result["xml_path"]).read_text(encoding="utf-8", errors="strict"))
+    router_lines = []
+    for idx in range(3):
+        router = _find_device(root, f"Router{idx}")
+        assert router is not None
+        router_lines.extend(_running_lines(router))
+    joined = "\n".join(router_lines)
+
+    assert "ip nat inside source list 10 interface" in joined
+    assert "BLOCK_MARKETING_TO_TECH" in joined
+    assert "MONDRAGONE_MAIL_ONLY" in joined
+    assert "BLOCK_BOLOGNA_TECH_FLOOR1_WEB" in joined or "BLOCK_BOLOGNA_TECH_FLOOR2_WEB" in joined
