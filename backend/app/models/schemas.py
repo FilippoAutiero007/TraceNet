@@ -39,8 +39,27 @@ class ParseNetworkRequest(BaseModel):
 class NormalizedSubnet(BaseModel):
     """Normalized subnet entry used by backend generation."""
     name: str = Field(..., min_length=1)
-    required_hosts: int = Field(..., ge=1)
+    required_hosts: Optional[int] = Field(default=None, ge=1)
+    network: Optional[str] = Field(default=None, description="Optional explicit subnet in CIDR notation")
+    gateway: Optional[str] = Field(default=None, description="Optional explicit default gateway for the subnet")
+    site: Optional[str] = Field(default=None, description="Optional site/office label")
     dns_server: Optional[str] = Field(default=None, description="Optional DNS server IP for this subnet")
+
+    @model_validator(mode="after")
+    def validate_subnet_shape(self):
+        if self.required_hosts is None and not self.network:
+            raise ValueError("Subnet requires either required_hosts or network.")
+        if self.network:
+            try:
+                ipaddress.ip_network(self.network, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"Invalid subnet network: {exc}") from exc
+        if self.gateway:
+            try:
+                ipaddress.ip_address(self.gateway)
+            except ValueError as exc:
+                raise ValueError(f"Invalid subnet gateway: {exc}") from exc
+        return self
 
 
 class TopologyConfig(BaseModel):
@@ -153,6 +172,35 @@ class PcConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class NetworkSite(BaseModel):
+    name: str = Field(..., min_length=1)
+    base_network: Optional[str] = Field(default=None, description="Primary private network for the site in CIDR form")
+    public_ip: Optional[str] = Field(default=None, description="Optional public IP exposed by the site/router")
+    notes: Optional[str] = Field(default=None)
+
+    @field_validator("base_network")
+    @classmethod
+    def validate_optional_site_cidr(cls, value: Optional[str]) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"Invalid site base network: {exc}") from exc
+        return value
+
+    @field_validator("public_ip")
+    @classmethod
+    def validate_optional_public_ip(cls, value: Optional[str]) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        try:
+            ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid public IP: {exc}") from exc
+        return value
+
+
 class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
     base_network: str = Field(..., description="Base network in CIDR notation")
@@ -170,6 +218,8 @@ class NormalizedNetworkRequest(BaseModel):
     nat: Optional[NatConfig] = Field(default=None, description="NAT configuration for routers")
     acl: List[AclConfig] = Field(default_factory=list, description="ACL configurations for routers")
     subnets: List[NormalizedSubnet] = Field(default_factory=list)
+    network_sites: List[NetworkSite] = Field(default_factory=list, description="Optional multi-site network hints extracted from the prompt")
+    requirements: List[str] = Field(default_factory=list, description="Free-form technical/security requirements extracted from the prompt")
     topology: Optional[TopologyConfig] = Field(
         default=None,
         description="Optional topology hints for separating edge and backbone routers",
@@ -276,6 +326,7 @@ class PktAnalysisResponse(BaseModel):
     link_count: int = 0
     issue_count: int = 0
     issues: List[PktAnalysisIssue] = Field(default_factory=list)
+    remediation_steps: List[str] = Field(default_factory=list)
     review: Optional[PktReviewResult] = None
     exercise_text: Optional[str] = None
     error: Optional[str] = None
@@ -304,8 +355,27 @@ class RoutingProtocol(str, Enum):
 
 class SubnetRequest(BaseModel):
     name: str = Field(..., min_length=1)
-    required_hosts: int = Field(..., ge=1)
+    required_hosts: Optional[int] = Field(default=None, ge=1)
+    network: Optional[str] = Field(default=None)
+    gateway: Optional[str] = Field(default=None)
+    site: Optional[str] = Field(default=None)
     dns_server: Optional[str] = Field(default=None)
+
+    @model_validator(mode="after")
+    def validate_request_shape(self):
+        if self.required_hosts is None and not self.network:
+            raise ValueError("Subnet requires either required_hosts or network.")
+        if self.network:
+            try:
+                ipaddress.ip_network(self.network, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"Invalid subnet network: {exc}") from exc
+        if self.gateway:
+            try:
+                ipaddress.ip_address(self.gateway)
+            except ValueError as exc:
+                raise ValueError(f"Invalid subnet gateway: {exc}") from exc
+        return self
 
 
 class DeviceConfig(BaseModel):

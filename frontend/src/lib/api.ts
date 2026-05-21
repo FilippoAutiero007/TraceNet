@@ -41,6 +41,7 @@ export interface PktAnalysisResponse {
   link_count: number;
   issue_count: number;
   issues: PktAnalysisIssue[];
+  remediation_steps?: string[];
   review?: PktReviewResult | null;
   exercise_text?: string | null;
   error?: string | null;
@@ -153,6 +154,27 @@ export const apiClient = {
     }
 
     return (await response.json()) as PktAnalysisResponse;
+  },
+
+  async downloadPktAnalysisPdf(file: File, options?: { exerciseText?: string; token?: string | null }) {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options?.exerciseText?.trim()) {
+      formData.append('exercise_text', options.exerciseText.trim());
+    }
+
+    const response = await fetchWithRetry(`${API_BASE_URL}/api/analyze-pkt-report`, {
+      method: 'POST',
+      headers: buildAuthHeaders(options?.token),
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(error.error || error.detail || 'Packet analysis PDF generation failed');
+    }
+
+    return await response.blob();
   },
 
   downloadFile(filename: string): string {

@@ -21,6 +21,7 @@ from app.models.schemas import (
     PktAnalysisResponse,
     UserCapabilitiesResponse,
     RoutingProtocol,
+    SubnetResult,
     SubnetRequest,
     DeviceConfig,
 )
@@ -28,6 +29,7 @@ from app.services.auth import AuthContext, get_optional_auth_context, require_pr
 from app.services.generation_quota import consume_generation_quota, get_generation_quota_status
 from app.services.nlp_parser import ParserServiceError, parse_network_request
 from app.services.pkt_analyzer import analyze_pkt_bytes
+from app.services.analysis_pdf import build_analysis_pdf_bytes
 from app.services.pkt_generator import save_pkt_file
 from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
@@ -37,6 +39,14 @@ from app.utils.errors import api_error, get_request_id
 _pkt_generation_lock = Lock()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["generate"])
+
+
+def _finalize_pkt_analysis(pkt_data: bytes, filename: str, exercise_text: str | None) -> PktAnalysisResponse:
+    analysis = analyze_pkt_bytes(pkt_data, filename=filename)
+    analysis.exercise_text = exercise_text
+    if analysis.success:
+        analysis.review = review_pkt_analysis(analysis, exercise_text)
+    return analysis
 
 
 def _default_subnet_for_base(base_network: str) -> SubnetRequest:
@@ -49,6 +59,44 @@ def _default_subnet_for_base(base_network: str) -> SubnetRequest:
         )
     usable_hosts = max(1, int(net.num_addresses) - 2)
     return SubnetRequest(name="LAN", required_hosts=usable_hosts)
+
+
+def _subnet_result_from_explicit(request: SubnetRequest) -> SubnetResult:
+    if not request.network:
+        raise ValueError(f"Subnet '{request.name}' is missing an explicit network.")
+
+    network = ipaddress.ip_network(request.network, strict=False)
+    if network.num_addresses < 4:
+        raise ValueError(f"Explicit subnet '{request.name}' is too small for Packet Tracer generation.")
+
+    gateway_ip = request.gateway or str(network.network_address + 1)
+    try:
+        ipaddress.ip_address(gateway_ip)
+    except ValueError as exc:
+        raise ValueError(f"Invalid explicit gateway for subnet '{request.name}': {exc}") from exc
+
+    usable_start = network.network_address + 2
+    usable_end = network.broadcast_address - 1
+    return SubnetResult(
+        name=request.name,
+        network=str(network),
+        mask=str(network.netmask),
+        gateway=gateway_ip,
+        usable_range=[str(usable_start), str(usable_end)],
+        broadcast=str(network.broadcast_address),
+        total_hosts=network.num_addresses,
+        usable_hosts=max(0, network.num_addresses - 2),
+        dns_server=request.dns_server,
+    )
+
+
+def _resolve_generation_subnets(
+    base_network: str,
+    subnets_input: list[SubnetRequest],
+) -> list[SubnetResult]:
+    if subnets_input and all(getattr(subnet, "network", None) for subnet in subnets_input):
+        return [_subnet_result_from_explicit(subnet) for subnet in subnets_input]
+    return calculate_vlsm(base_network, subnets_input)
 
 
 def _build_pkt_network_config_dict(
@@ -70,6 +118,8 @@ def _build_pkt_network_config_dict(
         "dhcp_dns": getattr(request, "dhcp_dns", None),
         "server_services": request.server_services or [],
         "servers_config": [s.model_dump() for s in request.servers_config] if request.servers_config else [],
+        "network_sites": [s.model_dump() for s in getattr(request, "network_sites", []) or []],
+        "requirements": list(getattr(request, "requirements", []) or []),
         "vlans": [v.model_dump() for v in getattr(request, "vlans", []) or []],
         "nat": request.nat.model_dump() if getattr(request, "nat", None) else None,
         "acl": [a.model_dump() for a in getattr(request, "acl", []) or []],
@@ -127,7 +177,7 @@ async def generate_network(request: NormalizedNetworkRequest, http_request: Requ
             dhcp_dns=request.dhcp_dns,
         )
 
-        subnets = calculate_vlsm(network_config.base_network, network_config.subnets)
+        subnets = _resolve_generation_subnets(network_config.base_network, network_config.subnets)
         cli_script = generate_cisco_config(network_config, subnets)
 
         return GenerateResponse(
@@ -172,7 +222,7 @@ async def generate_pkt_file(
 
         network_config_dict = _build_pkt_network_config_dict(request, subnets_input, protocol_value)
 
-        subnets = calculate_vlsm(request.base_network, subnets_input)
+        subnets = _resolve_generation_subnets(request.base_network, subnets_input)
         after_vlsm = perf_counter()
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
@@ -270,7 +320,7 @@ async def generate_pkt_file_manual(
     """Generate Cisco Packet Tracer .pkt file from structured parameters."""
     try:
         consume_generation_quota(auth, http_request)
-        subnets = calculate_vlsm(request.base_network, request.subnets)
+        subnets = _resolve_generation_subnets(request.base_network, request.subnets)
 
         network_config_dict = {
             "base_network": request.base_network,
@@ -285,6 +335,7 @@ async def generate_pkt_file_manual(
             "dns_records": request.dns_records or [],
             "server_services": request.server_services or [],
             "servers_config": [s.model_dump() for s in (request.servers_config or [])],
+            "network_sites": [s.model_dump() for s in (request.network_sites or [])],
             "vlans": [v.model_dump() for v in (request.vlans or [])],
             "acl": [a.model_dump() for a in (request.acl or [])],
             "pcs_config": [p.model_dump() for p in (request.pcs_config or [])],
@@ -376,11 +427,33 @@ async def analyze_pkt_file(
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
-    analysis = analyze_pkt_bytes(pkt_data, filename=filename)
-    analysis.exercise_text = exercise_text
-    if analysis.success:
-        analysis.review = review_pkt_analysis(analysis, exercise_text)
-    return analysis
+    return _finalize_pkt_analysis(pkt_data, filename, exercise_text)
+
+
+@router.post("/analyze-pkt-report")
+async def analyze_pkt_file_report(
+    file: UploadFile = File(...),
+    exercise_text: str | None = Form(default=None),
+    _auth: AuthContext = Depends(require_pro_user),
+):
+    """Analyze an uploaded Packet Tracer file and return a PDF report."""
+    filename = file.filename or "network.pkt"
+    if not filename.lower().endswith(".pkt"):
+        raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
+
+    pkt_data = await file.read()
+    if not pkt_data:
+        raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
+
+    analysis = _finalize_pkt_analysis(pkt_data, filename, exercise_text)
+    pdf_bytes = build_analysis_pdf_bytes(analysis)
+    safe_stem = os.path.splitext(os.path.basename(filename))[0] or "network"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{safe_stem}_analysis_report.pdf"',
+    }
+    from fastapi.responses import Response
+
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 @router.get("/me/capabilities", response_model=UserCapabilitiesResponse)

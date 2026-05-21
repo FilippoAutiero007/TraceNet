@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.models.schemas import (
     AclConfig,
     NatConfig,
+    NetworkSite,
     RoutingProtocol,
     DeviceConfig,
     PcConfig,
@@ -71,6 +72,10 @@ class ManualNetworkRequest(BaseModel):
         description="Per-PC configuration (mail credentials, etc.)",
     )
     dns_records: Optional[List[dict]] = Field(default=None, description="DNS A records for DNS server")
+    network_sites: Optional[List[NetworkSite]] = Field(
+        default=None,
+        description="Optional multi-site hints (base networks, public IPs, site names)",
+    )
     topology: Optional[TopologyConfig] = Field(
         default=None,
         description="Optional topology hints for edge/backbone router links"

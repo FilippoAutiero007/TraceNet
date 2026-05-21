@@ -116,6 +116,7 @@ def analyze_pkt_xml(root: ET.Element, filename: str | None = None) -> PktAnalysi
 
     summary = _build_summary(devices, links, issues)
     report = _build_report(summary, issues)
+    remediation_steps = _build_remediation_steps(issues)
     return PktAnalysisResponse(
         success=True,
         filename=filename,
@@ -125,6 +126,7 @@ def analyze_pkt_xml(root: ET.Element, filename: str | None = None) -> PktAnalysi
         link_count=len(links),
         issue_count=len(issues),
         issues=issues,
+        remediation_steps=remediation_steps,
     )
 
 
@@ -631,3 +633,17 @@ def _build_report(summary: str, issues: list[PktAnalysisIssue]) -> str:
             lines.append(f"Suggerimento: {issue.suggestion}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _build_remediation_steps(issues: list[PktAnalysisIssue]) -> list[str]:
+    seen: set[str] = set()
+    steps: list[str] = []
+    for issue in issues:
+        candidate = (issue.suggestion or issue.message or "").strip()
+        if not candidate:
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        steps.append(candidate)
+    return steps[:12]

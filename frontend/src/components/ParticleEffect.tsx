@@ -1,5 +1,55 @@
 import { useEffect, useRef } from 'react';
 
+class Particle {
+  x!: number;
+  y!: number;
+  ox!: number;
+  oy!: number;
+  vx!: number;
+  vy!: number;
+  r!: number;
+  hue!: number;
+  alpha!: number;
+  width!: () => number;
+  height!: () => number;
+
+  constructor(width: () => number, height: () => number) {
+    this.width = width;
+    this.height = height;
+    this.reset();
+  }
+
+  reset() {
+    this.x = Math.random() * this.width();
+    this.y = Math.random() * this.height();
+    this.ox = this.x;
+    this.oy = this.y;
+    this.vx = 0;
+    this.vy = 0;
+    this.r = Math.random() * 2.5 + 1;
+    this.hue = Math.random() * 60 + 200;
+    this.alpha = Math.random() * 0.5 + 0.4;
+  }
+
+  update(mouse: { x: number; y: number }, repel: number, force: number) {
+    const dx = this.x - mouse.x;
+    const dy = this.y - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < repel && dist > 0) {
+      const angle = Math.atan2(dy, dx);
+      const push = ((repel - dist) / repel) * force;
+      this.vx += Math.cos(angle) * push;
+      this.vy += Math.sin(angle) * push;
+    }
+    const homeX = (this.x - this.ox) * 0.05;
+    const homeY = (this.y - this.oy) * 0.05;
+    this.vx = (this.vx - homeX) * 0.88;
+    this.vy = (this.vy - homeY) * 0.88;
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+}
+
 export function ParticleEffect() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -10,8 +60,10 @@ export function ParticleEffect() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let W: number, H: number;
+    let W = 0;
+    let H = 0;
     let particles: Particle[] = [];
+    let animationFrameId = 0;
     const mouse = { x: -999, y: -999 };
     const N = 120, REPEL = 120, FORCE = 6;
 
@@ -25,64 +77,11 @@ export function ParticleEffect() {
       return `hsl(${h},${s}%,${l}%)`;
     }
 
-    class Particle {
-      x!: number;
-      y!: number;
-      ox!: number;
-      oy!: number;
-      vx!: number;
-      vy!: number;
-      r!: number;
-      hue!: number;
-      alpha!: number;
-
-      constructor() {
-        this.reset();
-      }
-
-      reset() {
-        this.x = Math.random() * W;
-        this.y = Math.random() * H;
-        this.ox = this.x;
-        this.oy = this.y;
-        this.vx = 0;
-        this.vy = 0;
-        this.r = Math.random() * 2.5 + 1;
-        this.hue = Math.random() * 60 + 200;
-        this.alpha = Math.random() * 0.5 + 0.4;
-      }
-
-      update() {
-        const dx = this.x - mouse.x;
-        const dy = this.y - mouse.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < REPEL && dist > 0) {
-          const angle = Math.atan2(dy, dx);
-          const push = (REPEL - dist) / REPEL * FORCE;
-          this.vx += Math.cos(angle) * push;
-          this.vy += Math.sin(angle) * push;
-        }
-        const homeX = (this.x - this.ox) * 0.05;
-        const homeY = (this.y - this.oy) * 0.05;
-        this.vx = (this.vx - homeX) * 0.88;
-        this.vy = (this.vy - homeY) * 0.88;
-        this.x += this.vx;
-        this.y += this.vy;
-      }
-
-      draw() {
-        ctx!.beginPath();
-        ctx!.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx!.fillStyle = hsl(this.hue, 80, 70);
-        ctx!.globalAlpha = this.alpha;
-        ctx!.fill();
-        ctx!.globalAlpha = 1;
-      }
-    }
-
     function initParticles() {
       particles = [];
-      for (let i = 0; i < N; i++) particles.push(new Particle());
+      for (let i = 0; i < N; i++) {
+        particles.push(new Particle(() => W, () => H));
+      }
     }
 
     function drawConnections() {
@@ -123,11 +122,16 @@ export function ParticleEffect() {
       ctx!.clearRect(0, 0, W, H);
       drawConnections();
       for (const p of particles) {
-        p.update();
-        p.draw();
+        p.update(mouse, REPEL, FORCE);
+        ctx!.beginPath();
+        ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx!.fillStyle = hsl(p.hue, 80, 70);
+        ctx!.globalAlpha = p.alpha;
+        ctx!.fill();
+        ctx!.globalAlpha = 1;
       }
       drawCursor();
-      requestAnimationFrame(loop);
+      animationFrameId = requestAnimationFrame(loop);
     }
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -153,21 +157,23 @@ export function ParticleEffect() {
       mouse.y = -999;
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseleave', handleMouseLeave);
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd);
-
-    resize();
-    initParticles();
-    loop();
-
     const handleWindowResize = () => {
       resize();
       initParticles();
     };
 
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('resize', handleWindowResize);
+
+    resize();
+    initParticles();
+    loop();
+
     return () => {
+      cancelAnimationFrame(animationFrameId);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseleave', handleMouseLeave);
       window.removeEventListener('touchmove', handleTouchMove);

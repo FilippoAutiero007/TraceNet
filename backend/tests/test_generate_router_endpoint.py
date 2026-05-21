@@ -160,6 +160,51 @@ def test_generate_pkt_uses_normalized_protocol_and_single_server_services_payloa
     assert payload["config_summary"]["routing_protocol"] == "static"
 
 
+def test_generate_pkt_manual_accepts_explicit_subnets_on_multiple_base_networks(monkeypatch):
+    captured = {}
+
+    def _fake_save_pkt_file(subnets, config, output_dir):
+        captured["subnets"] = subnets
+        captured["config"] = config
+        return {
+            "success": True,
+            "pkt_path": "/tmp/tracenet/multi-site.pkt",
+            "xml_path": "/tmp/tracenet/multi-site.xml",
+            "encoding_used": "template_based",
+            "file_size": 123,
+        }
+
+    monkeypatch.setattr("app.routers.generate.save_pkt_file", _fake_save_pkt_file)
+
+    response = client.post(
+        "/api/generate-pkt-manual",
+        json={
+            "base_network": "192.168.1.0/24",
+            "subnets": [
+                {"name": "BOLOGNA_LAN", "network": "192.168.1.0/24"},
+                {"name": "FIRENZE_DC", "network": "172.16.0.0/16"},
+            ],
+            "devices": {"routers": 2, "switches": 2, "pcs": 8},
+            "routing_protocol": "static",
+            "network_sites": [
+                {"name": "Bologna", "base_network": "192.168.1.0/24", "public_ip": "82.15.44.10"},
+                {"name": "Firenze", "base_network": "172.16.0.0/16"},
+            ],
+            "servers_config": [
+                {"services": ["dhcp"], "hostname": "marketing-dhcp.local"},
+                {"services": ["dns"], "hostname": "dns.horizon.local"},
+                {"services": ["http"], "hostname": "web.horizon.local"},
+                {"services": ["email"], "hostname": "mail.horizon.local"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert [subnet.network for subnet in captured["subnets"]] == ["192.168.1.0/24", "172.16.0.0/16"]
+    assert captured["config"]["network_sites"][0]["public_ip"] == "82.15.44.10"
+
+
 def test_generate_pkt_tolerates_optional_auth_provider_unavailable(monkeypatch):
     def _fake_save_pkt_file(subnets, config, output_dir):
         return {
@@ -313,6 +358,77 @@ def test_analyze_pkt_endpoint_returns_diagnostic_report():
     assert payload["exercise_text"] == "Rete con gateway e addressing coerente"
     assert payload["review"] is not None
     assert "things_to_fix" in payload["review"]
+    assert payload["remediation_steps"]
+    app.dependency_overrides.clear()
+
+
+def test_analyze_pkt_report_endpoint_returns_pdf():
+    app.dependency_overrides[require_pro_user] = lambda: AuthContext(
+        user_id="user_123",
+        session_id="sess_123",
+        plan="professional",
+        plan_scope="u",
+        is_pro=True,
+        claims={"sub": "user_123", "pla": "u:professional"},
+    )
+    xml = """
+    <PACKETTRACER5>
+      <VERSION>8.2.2.0400</VERSION>
+      <NETWORK>
+        <DEVICES>
+          <DEVICE>
+            <ENGINE>
+              <TYPE>Router</TYPE>
+              <NAME>Router0</NAME>
+              <SAVE_REF_ID>save-ref-id:r0</SAVE_REF_ID>
+              <MODULE>
+                <SLOT><MODULE><PORT><TYPE>eCopperFastEthernet</TYPE><IP>192.168.1.1</IP><SUBNET>255.255.255.0</SUBNET><PORT_GATEWAY /></PORT></MODULE></SLOT>
+              </MODULE>
+              <RUNNINGCONFIG>
+                <LINE>interface FastEthernet0/0</LINE>
+                <LINE> ip address 192.168.1.1 255.255.255.0</LINE>
+                <LINE>!</LINE>
+              </RUNNINGCONFIG>
+            </ENGINE>
+            <WORKSPACE><LOGICAL><DEV_ADDR>1</DEV_ADDR><MEM_ADDR>2</MEM_ADDR></LOGICAL></WORKSPACE>
+          </DEVICE>
+          <DEVICE>
+            <ENGINE>
+              <TYPE>Pc</TYPE>
+              <NAME>PC0</NAME>
+              <SAVE_REF_ID>save-ref-id:pc0</SAVE_REF_ID>
+              <MODULE>
+                <SLOT><MODULE><PORT><TYPE>eCopperFastEthernet</TYPE><IP>192.168.1.10</IP><SUBNET>255.255.255.0</SUBNET><PORT_GATEWAY /></PORT></MODULE></SLOT>
+              </MODULE>
+            </ENGINE>
+            <WORKSPACE><LOGICAL><DEV_ADDR>3</DEV_ADDR><MEM_ADDR>4</MEM_ADDR></LOGICAL></WORKSPACE>
+          </DEVICE>
+        </DEVICES>
+        <LINKS>
+          <LINK>
+            <CABLE>
+              <FROM>save-ref-id:r0</FROM>
+              <PORT>FastEthernet0/0</PORT>
+              <TO>save-ref-id:pc0</TO>
+              <PORT>FastEthernet0</PORT>
+            </CABLE>
+          </LINK>
+        </LINKS>
+      </NETWORK>
+    </PACKETTRACER5>
+    """
+    pkt_bytes = encrypt_pkt_data(xml.encode("utf-8"))
+
+    response = client.post(
+        "/api/analyze-pkt-report",
+        files={"file": ("broken.pkt", pkt_bytes, "application/octet-stream")},
+        data={"exercise_text": "Rete con gateway e addressing coerente"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"].endswith('broken_analysis_report.pdf"')
+    assert response.content.startswith(b"%PDF-1.4")
     app.dependency_overrides.clear()
 
 

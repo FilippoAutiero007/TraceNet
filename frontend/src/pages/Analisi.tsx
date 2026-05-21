@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX, RefreshCw, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,24 +16,37 @@ export function Analisi() {
   const [analysisResult, setAnalysisResult] = useState<PktAnalysisResponse | null>(null);
   const [capabilities, setCapabilities] = useState<UserCapabilitiesResponse | null>(null);
   const [isLoadingCapabilities, setIsLoadingCapabilities] = useState(true);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
-    loadCapabilities();
-  }, []);
+    let isMounted = true;
 
-  const loadCapabilities = async () => {
-    setIsLoadingCapabilities(true);
-    try {
-      const token = await getToken();
-      const caps = await apiClient.getUserCapabilities(token);
-      setCapabilities(caps);
-    } catch {
-      setCapabilities(null);
-    } finally {
-      setIsLoadingCapabilities(false);
-    }
-  };
+    const loadCapabilities = async () => {
+      setIsLoadingCapabilities(true);
+      try {
+        const token = await getToken();
+        const caps = await apiClient.getUserCapabilities(token);
+        if (isMounted) {
+          setCapabilities(caps);
+        }
+      } catch {
+        if (isMounted) {
+          setCapabilities(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingCapabilities(false);
+        }
+      }
+    };
+
+    void loadCapabilities();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getToken]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -115,6 +128,37 @@ export function Analisi() {
     setError(null);
     setAnalysisResult(null);
     setRetryCount(0);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!selectedFile || isDownloadingPdf) return;
+
+    setIsDownloadingPdf(true);
+    try {
+      const token = await getToken();
+      if (!token) {
+        setError('Devi effettuare l\'accesso per scaricare il report PDF.');
+        return;
+      }
+
+      const blob = await apiClient.downloadPktAnalysisPdf(selectedFile, {
+        exerciseText,
+        token,
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const baseName = selectedFile.name.replace(/\.pkt$/i, '') || 'network';
+      anchor.href = url;
+      anchor.download = `${baseName}_analysis_report.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   };
 
   const isPro = capabilities?.can_use_pro_pkt_review ?? false;
@@ -330,9 +374,29 @@ export function Analisi() {
                     <h2 className="text-2xl font-bold text-white mb-1">Risultati Analisi</h2>
                     <p className="text-slate-400 text-sm">{analysisResult.filename}</p>
                   </div>
-                  <Button variant="outline" onClick={handleReset} className="border-slate-700 text-slate-300 hover:bg-slate-800">
-                    Nuova analisi
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={handleDownloadPdf}
+                      disabled={!selectedFile || isDownloadingPdf}
+                      className="border-cyan-800 text-cyan-300 hover:bg-cyan-950/40"
+                    >
+                      {isDownloadingPdf ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Creo PDF...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="w-4 h-4 mr-2" />
+                          Scarica PDF
+                        </>
+                      )}
+                    </Button>
+                    <Button variant="outline" onClick={handleReset} className="border-slate-700 text-slate-300 hover:bg-slate-800">
+                      Nuova analisi
+                    </Button>
+                  </div>
                 </div>
 
                 {analysisResult.success ? (
@@ -476,6 +540,20 @@ export function Analisi() {
                             <p className="text-slate-300 text-sm">{analysisResult.review.alignment_with_exercise}</p>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {analysisResult.remediation_steps && analysisResult.remediation_steps.length > 0 && (
+                      <div className="bg-slate-800/30 rounded-lg p-4">
+                        <h3 className="text-white font-medium mb-3">Passi consigliati per correggere il file</h3>
+                        <ol className="space-y-2">
+                          {analysisResult.remediation_steps.map((step, index) => (
+                            <li key={index} className="text-slate-300 text-sm flex items-start gap-3">
+                              <span className="text-cyan-400 font-semibold min-w-5">{index + 1}.</span>
+                              <span>{step}</span>
+                            </li>
+                          ))}
+                        </ol>
                       </div>
                     )}
 

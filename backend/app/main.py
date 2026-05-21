@@ -5,6 +5,7 @@ Converts natural language to Cisco Packet Tracer configurations
 
 import os
 import uuid
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -22,10 +23,27 @@ load_dotenv()
 log_level = settings.log_level
 logger = setup_logger("tracenet", log_level)
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Log startup checks using the FastAPI lifespan API."""
+    runtime_checks = settings.validate_runtime()
+    logger.info(
+        "TraceNet API starting up",
+        extra={
+            "environment": settings.environment,
+            "log_level": log_level,
+            "runtime_checks": runtime_checks,
+        },
+    )
+    yield
+
+
 app = FastAPI(
     title="NetTrace API",
     description="Convert natural language to Cisco network configurations",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -94,20 +112,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content=payload)
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Log application startup"""
-    runtime_checks = settings.validate_runtime()
-    logger.info(
-        "TraceNet API starting up",
-        extra={
-            "environment": settings.environment,
-            "log_level": log_level,
-            "runtime_checks": runtime_checks,
-        },
-    )
-
-
 # CORS middleware for frontend
 # Allow localhost for dev + Vercel production/preview domains
 origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
@@ -160,7 +164,6 @@ def check_pka2xml():
 from app.routers import generate
 
 app.include_router(generate.router, prefix="/api")
-
 
 
 

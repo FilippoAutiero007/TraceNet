@@ -1,34 +1,32 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Activity, Zap, Brain, AlertTriangle } from 'lucide-react';
 
 import { ParticleEffect } from '@/components/ParticleEffect';
 
+const HERO_PARTICLES = Array.from({ length: 30 }, (_, i) => {
+  const normalized = (salt: number) => {
+    const value = Math.sin((i + 1) * 12.9898 + salt * 78.233) * 43758.5453;
+    return value - Math.floor(value);
+  };
+
+  return {
+    baseX: normalized(1) * 100,
+    baseY: normalized(2) * 100,
+    size: normalized(3) * 3 + 1,
+    duration: normalized(4) * 4 + 2,
+    opacity: 0.3 + normalized(5) * 0.4,
+    delay: normalized(6) * 2,
+    key: i,
+  };
+});
+
 export function Hero() {
   const [isHovered, setIsHovered] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const heroRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-
-  const particles = useMemo(() => {
-    const seed = 12345;
-    let state = seed;
-    const random = () => {
-      state = (state * 1103515245 + 12345) & 0x7fffffff;
-      return state / 0x7fffffff;
-    };
-    
-    return Array.from({ length: 30 }, (_, i) => ({
-      baseX: random() * 100,
-      baseY: random() * 100,
-      size: random() * 3 + 1,
-      duration: random() * 4 + 2,
-      opacity: 0.3 + random() * 0.4,
-      delay: random() * 2,
-      key: i,
-    }));
-  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -71,7 +69,7 @@ export function Hero() {
 
       {/* Animated Particles */}
       <div className="absolute inset-0 overflow-hidden">
-        {particles.map((p) => (
+        {HERO_PARTICLES.map((p) => (
             <div
               key={p.key}
               className="absolute rounded-full transition-all duration-1000 ease-out"
