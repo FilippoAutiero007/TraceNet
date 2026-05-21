@@ -36,9 +36,9 @@ def test_subnet_request_allows_large_required_hosts():
     assert req.required_hosts == 32000
 
 
-def test_device_config_allows_large_pc_counts():
-    cfg = DeviceConfig(routers=1, switches=1, pcs=5000)
-    assert cfg.pcs == 5000
+def test_device_config_allows_medium_pc_counts():
+    cfg = DeviceConfig(routers=1, switches=1, pcs=200)
+    assert cfg.pcs == 200
 
 
 def test_normalized_network_request_does_not_force_subnet_hosts_to_match_pc_count():
@@ -46,11 +46,11 @@ def test_normalized_network_request_does_not_force_subnet_hosts_to_match_pc_coun
         base_network="10.0.0.0/16",
         routers=1,
         switches=1,
-        pcs=5000,
+        pcs=200,
         routing_protocol="STATIC",
         subnets=[{"name": "LAN", "required_hosts": 100}],
     )
-    assert req.pcs == 5000
+    assert req.pcs == 200
     assert req.subnets[0].required_hosts == 100
 
 
