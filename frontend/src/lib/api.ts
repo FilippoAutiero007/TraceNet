@@ -47,10 +47,7 @@ export interface PktAnalysisResponse {
   error?: string | null;
 }
 
-export interface UserCapabilitiesResponse {
-  is_authenticated: boolean;
-  user_id?: string | null;
-}
+
 
 function buildAuthHeaders(token?: string | null): HeadersInit | undefined {
   if (!token) {
@@ -116,19 +113,6 @@ export const apiClient = {
     }
 
     return response.json();
-  },
-
-  async getUserCapabilities(token?: string | null) {
-    const response = await fetch(`${API_BASE_URL}/api/me/capabilities`, {
-      headers: buildAuthHeaders(token),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.error || error.detail || 'Capabilities lookup failed');
-    }
-
-    return (await response.json()) as UserCapabilitiesResponse;
   },
 
   async analyzePktFile(file: File, options?: { exerciseText?: string; token?: string | null }) {
