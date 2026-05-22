@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX, RefreshCw, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { SignInButton } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
 import { Footer } from '@/sections/Footer';
 import { apiClient, type PktAnalysisResponse, type UserCapabilitiesResponse } from '@/lib/api';
 
 export function Analisi() {
-  const { getToken } = useAuth();
+  const { getToken, isSignedIn } = useAuth();
+  const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [exerciseText, setExerciseText] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -162,7 +165,7 @@ export function Analisi() {
   };
 
   const isPro = capabilities?.can_use_pro_pkt_review ?? false;
-  const isAuthenticated = capabilities?.is_authenticated ?? false;
+  const isAuthenticated = capabilities?.is_authenticated ?? isSignedIn ?? false;
 
   if (isLoadingCapabilities) {
     return (
@@ -197,9 +200,11 @@ export function Analisi() {
               <p className="text-slate-400 mb-6">
                 Devi effettuare l'accesso per utilizzare la correzione avanzata dei file Packet Tracer.
               </p>
-              <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
-                Accedi o Registrati
-              </Button>
+              <SignInButton mode="modal">
+                <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
+                  Accedi o Registrati
+                </Button>
+              </SignInButton>
             </Card>
           </div>
         </section>
@@ -230,7 +235,10 @@ export function Analisi() {
               <p className="text-slate-400 mb-6">
                 Il tuo piano attuale non include la correzione avanzata dei file Packet Tracer importati.
               </p>
-              <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
+              <Button
+                className="bg-cyan-500 hover:bg-cyan-600 text-white"
+                onClick={() => navigate('/pricing')}
+              >
                 Aggiorna al piano Pro
               </Button>
             </Card>
