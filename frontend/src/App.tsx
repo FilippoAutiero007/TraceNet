@@ -8,7 +8,7 @@ import { Features } from '@/pages/Features';
 import { Pricing } from '@/pages/Pricing';
 import { Analisi } from '@/pages/Analisi';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { ParticleEffect } from '@/components/ParticleEffect';
+import Galaxy from '@/components/Galaxy';
 import './App.css';
 
 function App() {
@@ -18,7 +18,19 @@ function App() {
         <HashRouter>
           <div className="relative">
             <div className="fixed inset-0 z-0">
-              <ParticleEffect />
+              <Galaxy
+                starSpeed={0.5}
+                density={1}
+                hueShift={140}
+                speed={0.3}
+                glowIntensity={0.3}
+                saturation={0}
+                mouseRepulsion
+                repulsionStrength={12}
+                twinkleIntensity={0.3}
+                rotationSpeed={0.05}
+                transparent
+              />
             </div>
             <div className="relative z-10">
               <Navigation />
