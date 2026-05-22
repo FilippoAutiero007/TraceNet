@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Upload, Play, Download, Activity, Zap, Shield, Users } from 'lucide-react';
+import { Upload, Play, Download, Activity, Zap, Shield, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export function Free() {
@@ -110,15 +110,12 @@ export function Free() {
                 <div className="p-6 rounded-lg bg-green-500/10 border border-green-500/20">
                   <h3 className="text-lg font-semibold text-green-400 mb-2">Analisi Completata!</h3>
                   <p className="text-slate-300 mb-4">
-                    Analizzati con successo 1.000 pacchetti. Scarica i risultati o effettua l'upgrade per analisi più approfondite.
+                    Analizzati con successo 1.000 pacchetti.
                   </p>
                   <div className="flex gap-4">
                     <Button variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">
                       <Download className="w-4 h-4 mr-2" />
                       Scarica CSV
-                    </Button>
-                    <Button className="bg-cyan-500 hover:bg-cyan-600 text-white" onClick={() => navigate('/pricing')}>
-                      Upgrade a Pro
                     </Button>
                   </div>
                 </div>
@@ -150,37 +147,7 @@ export function Free() {
           </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="p-12 rounded-3xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20">
-            <h2 className="text-4xl font-bold text-white mb-6">
-              Pronto per Funzionalità Avanzate?
-            </h2>
-            <p className="text-xl text-slate-300 mb-8">
-              Effettua l'upgrade al piano Pro per sbloccare analisi illimitate e funzionalità enterprise.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Button
-                size="lg"
-                className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg"
-                onClick={() => navigate('/pricing')}
-              >
-                Vedi Piani Pro
-                <ArrowRight className="w-5 h-5 ml-2" />
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="border-slate-700 text-slate-300 hover:bg-slate-800 px-8 py-6 text-lg"
-                onClick={() => navigate('/')}
-              >
-                Torna alla Home
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
+
     </div>
   );
 }

@@ -1,55 +1,21 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { CheckCircle, XCircle, AlertCircle, Upload, Loader2, Bug, Sparkles, FileX, RefreshCw, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { SignInButton } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
 import { Footer } from '@/sections/Footer';
-import { apiClient, type PktAnalysisResponse, type UserCapabilitiesResponse } from '@/lib/api';
+import { apiClient, type PktAnalysisResponse } from '@/lib/api';
 
 export function Analisi() {
-  const { getToken, isSignedIn } = useAuth();
-  const navigate = useNavigate();
+  const { getToken } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [exerciseText, setExerciseText] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<PktAnalysisResponse | null>(null);
-  const [capabilities, setCapabilities] = useState<UserCapabilitiesResponse | null>(null);
-  const [isLoadingCapabilities, setIsLoadingCapabilities] = useState(true);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadCapabilities = async () => {
-      setIsLoadingCapabilities(true);
-      try {
-        const token = await getToken();
-        const caps = await apiClient.getUserCapabilities(token);
-        if (isMounted) {
-          setCapabilities(caps);
-        }
-      } catch {
-        if (isMounted) {
-          setCapabilities(null);
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingCapabilities(false);
-        }
-      }
-    };
-
-    void loadCapabilities();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [getToken]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -77,9 +43,6 @@ export function Analisi() {
       const msg = err.message.toLowerCase();
       if (msg.includes('service temporarily unavailable') || msg.includes('auth_service_temporarily_unavailable')) {
         return 'Servizio di autenticazione temporaneamente non disponibile. Il server potrebbe essere in fase di avvio. Riprova tra qualche secondo.';
-      }
-      if (msg.includes('pro plan required')) {
-        return 'Questa funzionalità richiede un piano Pro.';
       }
       if (msg.includes('authentication required') || msg.includes('invalid authentication')) {
         return 'Devi effettuare l\'accesso per utilizzare questa funzionalità.';
@@ -164,90 +127,7 @@ export function Analisi() {
     }
   };
 
-  const isPro = capabilities?.can_use_pro_pkt_review ?? false;
-  const isAuthenticated = capabilities?.is_authenticated ?? isSignedIn ?? false;
 
-  if (isLoadingCapabilities) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-cyan-400 mx-auto mb-4" />
-          <p className="text-slate-400">Caricamento...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen">
-        <section className="relative py-24 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-12">
-              <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-6">
-                Analisi File .pkt
-              </h1>
-              <p className="text-xl text-slate-300 max-w-3xl mx-auto">
-                Carica un file Packet Tracer e ottieni una review tecnica dettagliata
-              </p>
-            </div>
-
-            <Card className="bg-slate-900/50 border-slate-800 p-8 text-center">
-              <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-4">
-                Accesso richiesto
-              </h2>
-              <p className="text-slate-400 mb-6">
-                Devi effettuare l'accesso per utilizzare la correzione avanzata dei file Packet Tracer.
-              </p>
-              <SignInButton mode="modal">
-                <Button className="bg-cyan-500 hover:bg-cyan-600 text-white">
-                  Accedi o Registrati
-                </Button>
-              </SignInButton>
-            </Card>
-          </div>
-        </section>
-        <Footer />
-      </div>
-    );
-  }
-
-  if (!isPro) {
-    return (
-      <div className="min-h-screen">
-        <section className="relative py-24 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-12">
-              <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 mb-6">
-                Analisi File .pkt
-              </h1>
-              <p className="text-xl text-slate-300 max-w-3xl mx-auto">
-                Carica un file Packet Tracer e ottieni una review tecnica dettagliata
-              </p>
-            </div>
-
-            <Card className="bg-slate-900/50 border-slate-800 p-8 text-center">
-              <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-4">
-                Piano Pro richiesto
-              </h2>
-              <p className="text-slate-400 mb-6">
-                Il tuo piano attuale non include la correzione avanzata dei file Packet Tracer importati.
-              </p>
-              <Button
-                className="bg-cyan-500 hover:bg-cyan-600 text-white"
-                onClick={() => navigate('/pricing')}
-              >
-                Aggiorna al piano Pro
-              </Button>
-            </Card>
-          </div>
-        </section>
-        <Footer />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen">

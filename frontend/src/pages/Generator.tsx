@@ -418,7 +418,7 @@ export function Generator() {
                     {analysisResult.review && (
                       <div className="space-y-4 rounded-lg border border-cyan-900 bg-cyan-950/20 p-4">
                         <div className="flex items-center justify-between gap-3">
-                          <p className="font-semibold text-cyan-100">Review Pro</p>
+                          <p className="font-semibold text-cyan-100">Review</p>
                           <Badge className="bg-cyan-500 text-slate-950 hover:bg-cyan-500">
                             {analysisResult.review.source}
                           </Badge>

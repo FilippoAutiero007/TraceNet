@@ -12,7 +12,6 @@ export function Navigation() {
     { href: '/features', label: 'Funzionalità' },
     { href: '/generator', label: 'Generatore' },
     { href: '/analisi', label: 'Analisi' },
-    { href: '/pricing', label: 'Prezzi' },
   ];
 
   return (

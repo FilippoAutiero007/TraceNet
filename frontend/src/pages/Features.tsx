@@ -63,17 +63,10 @@ export function Features() {
             <Button
               size="lg"
               className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-6 text-lg"
-              onClick={() => navigate('/pricing')}
-            >
-              Vedi i Prezzi
-              <ArrowRight className="w-5 h-5 ml-2" />
-            </Button>
-            <Button
-              size="lg"
-              className="bg-white hover:bg-gray-100 text-black px-8 py-6 text-lg font-semibold"
               onClick={() => navigate('/generator')}
             >
-              Prova Gratis
+              Prova Ora
+              <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
           </div>
         </div>

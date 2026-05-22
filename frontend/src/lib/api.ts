@@ -50,10 +50,6 @@ export interface PktAnalysisResponse {
 export interface UserCapabilitiesResponse {
   is_authenticated: boolean;
   user_id?: string | null;
-  plan?: string | null;
-  plan_scope?: 'u' | 'o' | null;
-  is_pro: boolean;
-  can_use_pro_pkt_review: boolean;
 }
 
 function buildAuthHeaders(token?: string | null): HeadersInit | undefined {
