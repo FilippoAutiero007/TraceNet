@@ -29,7 +29,7 @@ class ParseIntent(str, Enum):
 
 class ParseNetworkRequest(BaseModel):
     """Request body for /api/parse-network-request endpoint"""
-    user_input: str = Field(..., min_length=1, description="User natural language input")
+    user_input: str = Field(..., min_length=1, max_length=2000, description="User natural language input")
     current_state: Dict[str, Any] = Field(
         default_factory=dict,
         description="Already collected conversation fields"
@@ -38,7 +38,7 @@ class ParseNetworkRequest(BaseModel):
 
 class NormalizedSubnet(BaseModel):
     """Normalized subnet entry used by backend generation."""
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=64)
     required_hosts: Optional[int] = Field(default=None, ge=1)
     network: Optional[str] = Field(default=None, description="Optional explicit subnet in CIDR notation")
     gateway: Optional[str] = Field(default=None, description="Optional explicit default gateway for the subnet")
@@ -113,7 +113,7 @@ class TopologyConfig(BaseModel):
 class VlanConfig(BaseModel):
     """Optional VLAN configuration for switches/router-on-a-stick (best-effort schema)."""
     id: int = Field(..., ge=1, le=4094, description="VLAN ID")
-    name: Optional[str] = Field(default=None, description="VLAN name")
+    name: Optional[str] = Field(default=None, max_length=64, description="VLAN name")
     subnet_name: Optional[str] = Field(default=None, description="Associated logical subnet name")
     native: bool = Field(default=False, description="Whether this VLAN is native on trunks")
 
@@ -147,7 +147,7 @@ class AclConfig(BaseModel):
 
 class ServerConfig(BaseModel):
     services: List[str] = Field(default_factory=list)
-    hostname: str = Field(default="")
+    hostname: str = Field(default="", max_length=64)
     ftp_user: Optional[str] = Field(default=None)
     ftp_password: Optional[str] = Field(default=None)
     ftp_users: Optional[list] = Field(default=None)
@@ -173,7 +173,7 @@ class PcConfig(BaseModel):
 
 
 class NetworkSite(BaseModel):
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=64)
     base_network: Optional[str] = Field(default=None, description="Primary private network for the site in CIDR form")
     public_ip: Optional[str] = Field(default=None, description="Optional public IP exposed by the site/router")
     notes: Optional[str] = Field(default=None)
@@ -204,10 +204,10 @@ class NetworkSite(BaseModel):
 class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
     base_network: str = Field(..., description="Base network in CIDR notation")
-    routers: int = Field(..., ge=1)
-    switches: int = Field(..., ge=0)
-    pcs: int = Field(..., ge=1)
-    servers: int = Field(default=0, ge=0)
+    routers: int = Field(..., ge=1, le=50)
+    switches: int = Field(..., ge=0, le=50)
+    pcs: int = Field(..., ge=1, le=200)
+    servers: int = Field(default=0, ge=0, le=20)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     dhcp_from_router: bool = Field(default=False, description="Enable IOS DHCP pools on routers and set PCs as DHCP clients")
     dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
