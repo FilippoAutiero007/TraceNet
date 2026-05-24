@@ -113,6 +113,7 @@ def analyze_pkt_xml(root: ET.Element, filename: str | None = None) -> PktAnalysi
     _analyze_end_devices(devices, issues)
     _analyze_router_configs(devices, issues)
     _analyze_segments(devices, links, issues)
+    _analyze_connectivity(devices, links, issues)
 
     summary = _build_summary(devices, links, issues)
     report = _build_report(summary, issues)
@@ -497,6 +498,44 @@ def _analyze_segments(devices: list[DeviceInfo], links: list[dict[str, str]], is
                     title="Sottoreti diverse nella stessa LAN",
                     message=f"Nello stesso segmento layer-2 compaiono subnet diverse: {summary}. Possibile errore di VLSM o gateway.",
                     suggestion="Verifica subnet mask, gateway e assegnazione delle LAN; se usi VLAN esplicite, assicurati che siano configurate correttamente.",
+                )
+            )
+
+
+def _analyze_connectivity(devices: list[DeviceInfo], links: list[dict[str, str]], issues: list[PktAnalysisIssue]) -> None:
+    connected_refs: set[str] = set()
+    for link in links:
+        if link["from"]:
+            connected_refs.add(link["from"])
+        if link["to"]:
+            connected_refs.add(link["to"])
+
+    for device in devices:
+        if not device.save_ref:
+            continue
+        if device.save_ref in connected_refs:
+            continue
+
+        if device.has_server_dhcp:
+            issues.append(
+                PktAnalysisIssue(
+                    severity="error",
+                    code="DHCP_SERVER_DISCONNECTED",
+                    title="Server DHCP non collegato alla rete",
+                    message=f"{device.name} ha il servizio DHCP attivo ma non ha alcun cavo di collegamento. Nessun dispositivo può ricevere indirizzi IP da questo server.",
+                    device=device.name,
+                    suggestion="Collega il server a uno switch usando un cavo diretto (ad esempio Copper Straight-Through).",
+                )
+            )
+        elif device.device_type in {"server", "pc", "laptop", "printer"}:
+            issues.append(
+                PktAnalysisIssue(
+                    severity="warning",
+                    code="DEVICE_DISCONNECTED",
+                    title="Dispositivo non collegato",
+                    message=f"{device.name} non ha alcun cavo di collegamento. Non può comunicare con altri dispositivi.",
+                    device=device.name,
+                    suggestion="Collega il dispositivo a uno switch con il cavo appropriato.",
                 )
             )
 
