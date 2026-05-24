@@ -114,6 +114,10 @@ def analyze_pkt_xml(root: ET.Element, filename: str | None = None) -> PktAnalysi
     _analyze_router_configs(devices, issues)
     _analyze_segments(devices, links, issues)
     _analyze_connectivity(devices, links, issues)
+    _analyze_device_configs(devices, issues)
+    _analyze_acls(devices, issues)
+    _analyze_vlan_topology(devices, links, issues)
+    _analyze_dhcp_topology(devices, links, issues)
 
     summary = _build_summary(devices, links, issues)
     report = _build_report(summary, issues)
@@ -503,20 +507,66 @@ def _analyze_segments(devices: list[DeviceInfo], links: list[dict[str, str]], is
 
 
 def _analyze_connectivity(devices: list[DeviceInfo], links: list[dict[str, str]], issues: list[PktAnalysisIssue]) -> None:
-    connected_refs: set[str] = set()
+    by_ref = {device.save_ref: device for device in devices if device.save_ref}
+    adjacency: dict[str, set[str]] = defaultdict(set)
     for link in links:
         if link["from"]:
-            connected_refs.add(link["from"])
+            adjacency[link["from"]].add(link["to"])
         if link["to"]:
-            connected_refs.add(link["to"])
+            adjacency[link["to"]].add(link["from"])
+
+    connected_refs = set(adjacency.keys())
+    router_refs = {d.save_ref for d in devices if d.device_type == "router" and d.save_ref}
 
     for device in devices:
         if not device.save_ref:
             continue
         if device.save_ref in connected_refs:
+            if device.device_type in TRANSIT_DEVICE_TYPES:
+                has_router_in_segment = False
+                if router_refs:
+                    segment = _switch_segment(device.save_ref, adjacency, by_ref)
+                    has_router_in_segment = bool(router_refs & segment)
+                if not has_router_in_segment:
+                    issues.append(
+                        PktAnalysisIssue(
+                            severity="warning",
+                            code="SWITCH_NO_UPLINK",
+                            title="Switch senza collegamento al router",
+                            message=f"{device.name} è collegato solo a dispositivi finali ma non ha un percorso verso alcun router. I dispositivi in questa LAN non possono uscire dalla rete locale.",
+                            device=device.name,
+                            suggestion="Collega lo switch a un router (direttamente o tramite un altro switch) per garantire connettività verso altre reti.",
+                        )
+                    )
+            continue
+        if device.save_ref in connected_refs:
+            if device.device_type in TRANSIT_DEVICE_TYPES and router_refs:
+                segment = _switch_segment(device.save_ref, adjacency, by_ref)
+                if not router_refs & segment:
+                    issues.append(
+                        PktAnalysisIssue(
+                            severity="warning",
+                            code="SWITCH_NO_UPLINK",
+                            title="Switch senza collegamento al router",
+                            message=f"{device.name} è collegato solo a dispositivi finali ma non ha un percorso verso alcun router. I dispositivi in questa LAN non possono uscire dalla rete locale.",
+                            device=device.name,
+                            suggestion="Collega lo switch a un router (direttamente o tramite un altro switch) per garantire connettività verso altre reti.",
+                        )
+                    )
             continue
 
-        if device.has_server_dhcp:
+        if device.device_type == "router":
+            issues.append(
+                PktAnalysisIssue(
+                    severity="error",
+                    code="ROUTER_DISCONNECTED",
+                    title="Router non collegato",
+                    message=f"{device.name} non ha alcun cavo di collegamento. Non può instradare pacchetti.",
+                    device=device.name,
+                    suggestion="Collega il router a uno switch o direttamente ad altri router usando cavi Copper o Seriali.",
+                )
+            )
+        elif device.has_server_dhcp:
             issues.append(
                 PktAnalysisIssue(
                     severity="error",
@@ -536,6 +586,311 @@ def _analyze_connectivity(devices: list[DeviceInfo], links: list[dict[str, str]]
                     message=f"{device.name} non ha alcun cavo di collegamento. Non può comunicare con altri dispositivi.",
                     device=device.name,
                     suggestion="Collega il dispositivo a uno switch con il cavo appropriato.",
+                )
+            )
+
+
+def _analyze_device_configs(devices: list[DeviceInfo], issues: list[PktAnalysisIssue]) -> None:
+    for device in devices:
+        if device.name == "Unknown":
+            issues.append(
+                PktAnalysisIssue(
+                    severity="warning",
+                    code="DEVICE_UNNAMED",
+                    title="Dispositivo senza nome",
+                    message=f"Un dispositivo di tipo {device.device_type} non ha un nome configurato (nome predefinito 'Unknown').",
+                    suggestion="Assegna un nome descrittivo al dispositivo per identificarlo nella topologia.",
+                )
+            )
+
+        if not device.ports and device.device_type in TRANSIT_DEVICE_TYPES | {"router"}:
+            issues.append(
+                PktAnalysisIssue(
+                    severity="error",
+                    code="DEVICE_NO_PORTS",
+                    title="Dispositivo senza porte",
+                    message=f"{device.name} ({device.device_type}) non ha porte di rete configurate. Non può connettersi ad altri dispositivi.",
+                    device=device.name,
+                    suggestion="Aggiungi moduli di interfaccia al dispositivo o verifica che lo slot non sia vuoto.",
+                )
+            )
+
+        if device.device_type != "router":
+            continue
+
+        config_data = _parse_running_config_detailed(device.running_config_lines)
+
+        for port in device.ports:
+            port_has_ip = port.has_ip
+            iface_in_config = any(
+                port.name in iface or port.name.replace("/0", "") in iface
+                for iface in config_data["interfaces"]
+            )
+            if not port_has_ip and not port.dhcp_enabled and iface_in_config:
+                issues.append(
+                    PktAnalysisIssue(
+                        severity="error",
+                        code="ROUTER_INTERFACE_NO_IP",
+                        title="Interfaccia router senza IP",
+                        message=f"{device.name} {port.name} non ha un indirizzo IP configurato ma è presente nella running-config.",
+                        device=device.name,
+                        interface=port.name,
+                        suggestion="Configura 'ip address' sull'interfaccia o usa 'no ip address' per disabilitarla esplicitamente.",
+                    )
+                )
+
+        shutdown_interfaces = config_data["interfaces_shutdown"]
+        if len(shutdown_interfaces) == len([p for p in device.ports if p.name in config_data["interfaces"]]):
+            if shutdown_interfaces:
+                iface_list = ", ".join(sorted(shutdown_interfaces))
+                issues.append(
+                    PktAnalysisIssue(
+                        severity="warning",
+                        code="ALL_INTERFACES_SHUTDOWN",
+                        title="Tutte le interfacce router sono spente",
+                        message=f"{device.name} ha tutte le interfacce in stato 'shutdown': {iface_list}. Il router non può instradare pacchetti.",
+                        device=device.name,
+                        suggestion="Usa 'no shutdown' sulle interfacce che devono essere attive.",
+                    )
+                )
+
+        for iface in config_data["serial_interfaces_no_clock"]:
+            issues.append(
+                PktAnalysisIssue(
+                    severity="warning",
+                    code="SERIAL_NO_CLOCK_RATE",
+                    title="Interfaccia seriale senza clock rate",
+                    message=f"{device.name} {iface} è un'interfaccia seriale ma non ha 'clock rate' configurato sul lato DCE.",
+                    device=device.name,
+                    interface=iface,
+                    suggestion="Configura 'clock rate 64000' o superiore sull'interfaccia seriale DCE.",
+                )
+            )
+
+        if not device.running_config_lines:
+            issues.append(
+                PktAnalysisIssue(
+                    severity="warning",
+                    code="ROUTER_NO_CONFIG",
+                    title="Router senza configurazione",
+                    message=f"{device.name} non ha alcuna riga di configurazione (running-config vuota).",
+                    device=device.name,
+                    suggestion="Apri il router in Packet Tracer e configuralo con IP, routing, ecc.",
+                )
+            )
+
+
+def _parse_running_config_detailed(lines: list[str]) -> dict[str, object]:
+    interfaces: dict[str, dict[str, object]] = {}
+    current_iface: Optional[str] = None
+    access_list_entries: set[str] = set()
+    serial_interfaces_no_clock: list[str] = []
+    dhcp_pool_names: list[str] = []
+    has_dhcp_pool = False
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        lower = line.lower()
+
+        if lower.startswith("interface "):
+            current_iface = line.split(None, 1)[1]
+            interfaces[current_iface] = {"has_ip": False, "shutdown": False, "acl_in": None, "acl_out": None, "encapsulation": None}
+            if "serial" in current_iface.lower():
+                interfaces[current_iface]["is_serial"] = True
+            continue
+
+        if line == "!":
+            current_iface = None
+            continue
+
+        if current_iface is None:
+            if lower.startswith("access-list "):
+                parts = line.split()
+                if len(parts) >= 2:
+                    access_list_entries.add(parts[1])
+            if "ip dhcp pool" in lower:
+                has_dhcp_pool = True
+                dhcp_pool_names.append(line.split(None, 3)[-1] if len(line.split()) > 3 else "unknown")
+            continue
+
+        if lower.startswith("ip address "):
+            interfaces[current_iface]["has_ip"] = True
+            continue
+
+        if lower == "shutdown":
+            interfaces[current_iface]["shutdown"] = True
+            continue
+
+        if lower.startswith("ip access-group "):
+            parts = line.split()
+            if len(parts) >= 3:
+                direction = "in" if "in" in lower else "out"
+                acl_ref = parts[2]
+                interfaces[current_iface][f"acl_{direction}"] = acl_ref
+
+        if lower.startswith("clock rate "):
+            if current_iface:
+                interfaces[current_iface]["has_clock_rate"] = True
+
+        if lower.startswith("encapsulation dot1q"):
+            if current_iface:
+                interfaces[current_iface]["encapsulation"] = line.split(None, 2)[1] if len(line.split()) >= 2 else "dot1q"
+
+    iface_names = list(interfaces.keys())
+    shutdown_ifaces = [name for name, data in interfaces.items() if data.get("shutdown")]
+    ip_ifaces = [name for name, data in interfaces.items() if data.get("has_ip")]
+    acl_ifaces_in = {name: data.get("acl_in") for name, data in interfaces.items() if data.get("acl_in")}
+    acl_ifaces_out = {name: data.get("acl_out") for name, data in interfaces.items() if data.get("acl_out")}
+    serial_no_clock = [name for name, data in interfaces.items() if data.get("is_serial") and not data.get("has_clock_rate")]
+    subifaces = {name: data.get("encapsulation") for name, data in interfaces.items() if "." in name}
+
+    return {
+        "interfaces": iface_names,
+        "interfaces_shutdown": shutdown_ifaces,
+        "interfaces_with_ip": ip_ifaces,
+        "acl_inbound": acl_ifaces_in,
+        "acl_outbound": acl_ifaces_out,
+        "access_list_entries": sorted(access_list_entries),
+        "serial_interfaces_no_clock": serial_no_clock,
+        "has_dhcp_pool": has_dhcp_pool,
+        "dhcp_pool_names": dhcp_pool_names,
+        "subinterfaces": subifaces,
+    }
+
+
+def _analyze_acls(devices: list[DeviceInfo], issues: list[PktAnalysisIssue]) -> None:
+    for device in devices:
+        if device.device_type != "router":
+            continue
+        config_data = _parse_running_config_detailed(device.running_config_lines)
+
+        all_acls_applied: set[str] = set()
+        for acl_ref in list(config_data["acl_inbound"].values()) + list(config_data["acl_outbound"].values()):
+            if acl_ref:
+                all_acls_applied.add(acl_ref)
+
+        if not all_acls_applied:
+            continue
+
+        for acl_ref in all_acls_applied:
+            if acl_ref not in config_data["access_list_entries"]:
+                issues.append(
+                    PktAnalysisIssue(
+                        severity="error",
+                        code="ACL_REFERENCE_NOT_FOUND",
+                        title="ACL referenziata ma non definita",
+                        message=f"{device.name} usa 'ip access-group {acl_ref}' ma non esiste una access-list corrispondente nella configurazione.",
+                        device=device.name,
+                        suggestion="Definisci la access-list con i permessi desiderati, ad esempio: 'access-list {acl_ref} permit ip any any'.",
+                    )
+                )
+
+
+def _analyze_vlan_topology(devices: list[DeviceInfo], links: list[dict[str, str]], issues: list[PktAnalysisIssue]) -> None:
+    by_ref = {d.save_ref: d for d in devices if d.save_ref}
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for link in links:
+        if link["from"] and link["to"]:
+            adjacency[link["from"]].add(link["to"])
+            adjacency[link["to"]].add(link["from"])
+
+    switches_with_vlans = [d for d in devices if d.device_type == "switch" and d.has_vlan_config]
+    if switches_with_vlans:
+        router_refs = {d.save_ref for d in devices if d.device_type == "router" and d.save_ref}
+
+        has_router_in_topology = False
+        for sw in switches_with_vlans:
+            if not sw.save_ref:
+                continue
+            segment = _switch_segment(sw.save_ref, adjacency, by_ref)
+            if router_refs & segment:
+                has_router_in_topology = True
+                break
+
+        if not has_router_in_topology:
+            for sw in switches_with_vlans[:1]:
+                issues.append(
+                    PktAnalysisIssue(
+                        severity="warning",
+                        code="VLAN_NO_ROUTER",
+                        title="VLAN configurate ma nessun router raggiungibile",
+                        message=f"{sw.name} ha configurazione VLAN ma nessun router è collegato allo switch direttamente o tramite altri switch. Il routing inter-VLAN non è possibile.",
+                        device=sw.name,
+                        suggestion="Collega un router allo switch configurando un'interfaccia trunk o subinterfacce con 'encapsulation dot1q'.",
+                    )
+                )
+                break
+
+    for device in devices:
+        if device.device_type != "router":
+            continue
+        config_data = _parse_running_config_detailed(device.running_config_lines)
+        subifaces = config_data["subinterfaces"]
+        for siface, encap in subifaces.items():
+            if encap is None:
+                issues.append(
+                    PktAnalysisIssue(
+                        severity="error",
+                        code="SUBFACE_NO_ENCAPSULATION",
+                        title="Subinterfaccia senza encapsulation dot1q",
+                        message=f"{device.name} {siface} è una subinterfaccia ma non ha 'encapsulation dot1q' configurato.",
+                        device=device.name,
+                        interface=siface,
+                        suggestion="Configura 'encapsulation dot1q <vlan-id>' sulla subinterfaccia per abilitare il routing inter-VLAN (Router-on-a-Stick).",
+                    )
+                )
+
+
+def _analyze_dhcp_topology(devices: list[DeviceInfo], links: list[dict[str, str]], issues: list[PktAnalysisIssue]) -> None:
+    by_ref = {d.save_ref: d for d in devices if d.save_ref}
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for link in links:
+        if link["from"] and link["to"]:
+            adjacency[link["from"]].add(link["to"])
+            adjacency[link["to"]].add(link["from"])
+
+    dhcp_servers = [(d, _collect_dhcp_capable_networks([d])) for d in devices if d.has_server_dhcp]
+
+    if not dhcp_servers or len(dhcp_servers) < 2:
+        return
+
+    for i in range(len(dhcp_servers)):
+        for j in range(i + 1, len(dhcp_servers)):
+            dev_a, nets_a = dhcp_servers[i]
+            dev_b, nets_b = dhcp_servers[j]
+            shared = nets_a & nets_b
+            if shared:
+                issues.append(
+                    PktAnalysisIssue(
+                        severity="warning",
+                        code="MULTIPLE_DHCP_SERVERS",
+                        title="Server DHCP multipli sulla stessa rete",
+                        message=f"{dev_a.name} e {dev_b.name} possono entrambi servire DHCP sulla stessa subnet {', '.join(sorted(shared))}. Possibile conflitto di indirizzi.",
+                        suggestion="Configura un solo server DHCP per subnet o usa DHCP pooling con indirizzi mutualmente esclusivi.",
+                    )
+                )
+
+    for device in devices:
+        if device.device_type != "router":
+            continue
+        config_data = _parse_running_config_detailed(device.running_config_lines)
+        if not config_data["has_dhcp_pool"]:
+            continue
+        router_nets = set()
+        for port in device.ports:
+            net = _safe_network(port.ip, port.subnet)
+            if net:
+                router_nets.add(str(net))
+
+        for pool_name in config_data["dhcp_pool_names"]:
+            issues.append(
+                PktAnalysisIssue(
+                    severity="info",
+                    code="DHCP_POOL_CONFIGURED",
+                    title="Pool DHCP configurato sul router",
+                    message=f"{device.name} ha un pool DHCP '{pool_name}'. Verifica che la rete del pool corrisponda alla subnet dell'interfaccia LAN.",
+                    device=device.name,
+                    suggestion="Assicurati che il comando 'network' nel pool DHCP corrisponda alla subnet della LAN collegata.",
                 )
             )
 
