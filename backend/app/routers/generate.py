@@ -619,7 +619,6 @@ async def analyze_pkt_file(
 async def analyze_pkt_file_report(
     file: UploadFile = File(...),
     exercise_text: str | None = Form(default=None),
-    _auth: AuthContext = Depends(require_pro_user),
 ):
     """Analyze an uploaded Packet Tracer file and return a PDF report."""
     filename = file.filename or "network.pkt"
