@@ -26,7 +26,7 @@ from app.models.schemas import (
     SubnetRequest,
     DeviceConfig,
 )
-from app.services.auth import AuthContext, get_optional_auth_context, require_pro_user
+from app.services.auth import AuthContext, get_optional_auth_context
 from app.services.generation_quota import consume_generation_quota, get_generation_quota_status
 from app.services.nlp_parser import ParserServiceError, parse_network_request
 from app.services.pkt_analyzer import analyze_pkt_bytes
