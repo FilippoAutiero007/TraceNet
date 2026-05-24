@@ -129,8 +129,8 @@ export function SEOHead({
       
       {/* Favicon */}
       <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-      <link rel="icon" type="image/png" href="/favicon.png" />
-      <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+      <link rel="shortcut icon" href="/favicon.svg" />
+      <link rel="apple-touch-icon" href="/favicon.svg" />
       
       {/* Sitemap */}
       <link rel="sitemap" type="application/xml" href="/sitemap.xml" />

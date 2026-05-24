@@ -602,9 +602,8 @@ async def generate_pkt_file_manual(
 async def analyze_pkt_file(
     file: UploadFile = File(...),
     exercise_text: str | None = Form(default=None),
-    _auth: AuthContext = Depends(require_pro_user),
 ):
-    """Analyze an uploaded Packet Tracer file and return a Pro diagnostic report."""
+    """Analyze an uploaded Packet Tracer file."""
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
