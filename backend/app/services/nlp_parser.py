@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
@@ -11,6 +10,7 @@ from mistralai import Mistral
 from pydantic import BaseModel, Field, ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from app.config import settings
 from app.models.schemas import ParseIntent, ParseNetworkResponse
 from app.services.rag_knowledge import NETWORK_PARSER_DOCUMENTS, retrieve_relevant_documents
 from app.utils.cache import response_cache
@@ -552,9 +552,9 @@ async def parse_network_request(
     heuristic_json = _heuristic_parse(user_input)
     heuristic_merged = _merge_with_state(heuristic_json, current_state)
 
-    api_key = os.environ.get("MISTRAL_API_KEY")
+    api_key = settings.mistral_api_key.get_secret_value() if settings.mistral_api_key else None
     if not api_key:
-        logger.warning("MISTRAL_API_KEY not found. NLP parsing is disabled.")
+        logger.warning("MISTRAL_API_KEY not found in settings. NLP parsing is disabled.")
         merged = heuristic_merged
         missing, normalized = _validate_normalized_json(merged)
 
