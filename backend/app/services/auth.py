@@ -99,7 +99,7 @@ def _is_pro_plan(plan_slug: Optional[str]) -> bool:
     return plan_slug.lower() in allowed
 
 
-def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None:
+def _validate_authorized_party(claims: dict[str, Any]) -> None:
     configured = [
         item.strip()
         for item in settings.clerk_authorized_parties.split(",")
@@ -109,10 +109,7 @@ def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None
         return
 
     azp = str(claims.get("azp") or "").strip()
-    origin = request.headers.get("Origin", "").strip()
     if azp and azp in configured:
-        return
-    if origin and origin in configured:
         return
     raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
@@ -151,7 +148,7 @@ async def verify_clerk_session_token(request: Request) -> AuthContext:
     except jwt.InvalidTokenError as exc:
         raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.") from exc
 
-    _validate_authorized_party(claims, request)
+    _validate_authorized_party(claims)
 
     scope, plan_slug = _extract_plan(claims)
     user_id = str(claims.get("sub") or "").strip()
