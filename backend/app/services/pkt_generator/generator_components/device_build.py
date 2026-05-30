@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import ipaddress
 import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DET
 from pathlib import Path
 from typing import Any, Optional
 
@@ -400,7 +401,7 @@ def build_device(
         raise FileNotFoundError(f"Template file not found: {template_path}")
 
     xml_str = decrypt_pkt_data(template_path.read_bytes()).decode("utf-8", errors="strict")
-    template_root = ET.fromstring(xml_str)
+    template_root = DET.fromstring(xml_str)
     template_network = template_root.find("NETWORK")
     if template_network is None:
         raise ValueError(f"Invalid device template {template_path}: missing NETWORK")

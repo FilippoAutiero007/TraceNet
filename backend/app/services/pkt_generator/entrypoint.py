@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import os
 import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DET
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -651,7 +652,7 @@ def save_pkt_file(subnets: list, config: dict[str, Any], output_dir: str) -> dic
         # Export XML of the GENERATED PKT (not the template)
         pkt_bytes = Path(pkt_path).read_bytes()
         generated_xml = decrypt_pkt_data(pkt_bytes).decode("utf-8", errors="strict")
-        xml_root = ET.fromstring(generated_xml)
+        xml_root = DET.fromstring(generated_xml)
         validate_pkt_xml(xml_root)
         Path(xml_path).write_text(generated_xml, encoding="utf-8")
 
