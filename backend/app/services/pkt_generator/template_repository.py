@@ -5,6 +5,7 @@ import copy
 import logging
 import threading
 import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DET
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -64,7 +65,8 @@ class TemplateRepository:
     def _load_template_file(self, path: Path) -> ET.Element:
         template_bytes = path.read_bytes()
         xml_str = decrypt_pkt_data(template_bytes).decode("utf-8", errors="strict")
-        return ET.fromstring(xml_str)
+        # Use defusedxml to prevent XXE and DoS attacks when parsing untrusted XML data.
+        return DET.fromstring(xml_str)
 
     @staticmethod
     def _extract_link_template(root: ET.Element) -> Optional[ET.Element]:

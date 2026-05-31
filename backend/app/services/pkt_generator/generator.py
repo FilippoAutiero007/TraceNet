@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DET
 
 from app.services.pkt_crypto import decrypt_pkt_data, encrypt_pkt_data
 from .generator_components import PhysicalWorkspaceOps, build_device, create_link
@@ -96,7 +97,8 @@ class PKTGenerator:
         if not SIMPLE_REF_PATH.exists():
             raise FileNotFoundError(f"Base template not found: {SIMPLE_REF_PATH}")
         xml_str = decrypt_pkt_data(SIMPLE_REF_PATH.read_bytes()).decode("utf-8", errors="strict")
-        root = ET.fromstring(xml_str)
+        # Use defusedxml to prevent XXE and DoS attacks when parsing untrusted XML data.
+        root = DET.fromstring(xml_str)
         if root.find("NETWORK") is None:
             raise ValueError("Invalid base template: missing NETWORK")
         return root
@@ -108,7 +110,8 @@ class PKTGenerator:
         """
         template_path = self._resolve_template_path_for_device_type(device_type)
         xml_str = decrypt_pkt_data(template_path.read_bytes()).decode("utf-8", errors="strict")
-        root = ET.fromstring(xml_str)
+        # Use defusedxml to prevent XXE and DoS attacks when parsing untrusted XML data.
+        root = DET.fromstring(xml_str)
         if root.find("NETWORK") is None:
             raise ValueError(f"Invalid template {template_path}: missing NETWORK")
         return root
@@ -117,7 +120,8 @@ class PKTGenerator:
         links = root.findall("NETWORK/LINKS/LINK")
         if links:
             return copy.deepcopy(links[0])
-        return ET.fromstring(DEFAULT_LINK_TEMPLATE_XML)
+        # Use defusedxml to prevent XXE and DoS attacks when parsing untrusted XML data.
+        return DET.fromstring(DEFAULT_LINK_TEMPLATE_XML)
 
     def generate(
         self,
