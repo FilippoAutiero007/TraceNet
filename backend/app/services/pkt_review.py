@@ -76,7 +76,8 @@ def _fallback_review(analysis: PktAnalysisResponse, exercise_text: str | None) -
 
 
 def review_pkt_analysis(analysis: PktAnalysisResponse, exercise_text: str | None) -> PktReviewResult:
-    api_key = os.environ.get("MISTRAL_API_KEY")
+    from app.config import settings
+    api_key = settings.mistral_api_key.get_secret_value() if settings.mistral_api_key else None
     if not api_key:
         return _fallback_review(analysis, exercise_text)
 
