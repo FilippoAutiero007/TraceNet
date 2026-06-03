@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 import httpx
+from app.config import settings
 from mistralai import Mistral
 from pydantic import BaseModel, Field, ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -552,7 +553,7 @@ async def parse_network_request(
     heuristic_json = _heuristic_parse(user_input)
     heuristic_merged = _merge_with_state(heuristic_json, current_state)
 
-    api_key = os.environ.get("MISTRAL_API_KEY")
+    api_key = settings.mistral_api_key.get_secret_value() if settings.mistral_api_key else None
     if not api_key:
         logger.warning("MISTRAL_API_KEY not found. NLP parsing is disabled.")
         merged = heuristic_merged
