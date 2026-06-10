@@ -29,7 +29,12 @@ class ParseIntent(str, Enum):
 
 class ParseNetworkRequest(BaseModel):
     """Request body for /api/parse-network-request endpoint"""
-    user_input: str = Field(..., min_length=1, description="User natural language input")
+    user_input: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="User natural language input"
+    )
     current_state: Dict[str, Any] = Field(
         default_factory=dict,
         description="Already collected conversation fields"
@@ -38,7 +43,7 @@ class ParseNetworkRequest(BaseModel):
 
 class NormalizedSubnet(BaseModel):
     """Normalized subnet entry used by backend generation."""
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=64)
     required_hosts: Optional[int] = Field(default=None, ge=1)
     network: Optional[str] = Field(default=None, description="Optional explicit subnet in CIDR notation")
     gateway: Optional[str] = Field(default=None, description="Optional explicit default gateway for the subnet")
@@ -173,7 +178,7 @@ class PcConfig(BaseModel):
 
 
 class NetworkSite(BaseModel):
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=64)
     base_network: Optional[str] = Field(default=None, description="Primary private network for the site in CIDR form")
     public_ip: Optional[str] = Field(default=None, description="Optional public IP exposed by the site/router")
     notes: Optional[str] = Field(default=None)
@@ -204,10 +209,10 @@ class NetworkSite(BaseModel):
 class NormalizedNetworkRequest(BaseModel):  
     """Normalized payload accepted by /api/generate-pkt (no free text)."""
     base_network: str = Field(..., description="Base network in CIDR notation")
-    routers: int = Field(..., ge=1)
-    switches: int = Field(..., ge=0)
-    pcs: int = Field(..., ge=1)
-    servers: int = Field(default=0, ge=0)
+    routers: int = Field(..., ge=1, le=50)
+    switches: int = Field(..., ge=0, le=50)
+    pcs: int = Field(..., ge=1, le=200)
+    servers: int = Field(default=0, ge=0, le=20)
     routing_protocol: str = Field(..., description="STATIC | RIP | OSPF | EIGRP")
     dhcp_from_router: bool = Field(default=False, description="Enable IOS DHCP pools on routers and set PCs as DHCP clients")
     dhcp_dns: Optional[str] = Field(default=None, description="Optional DNS server IP for router DHCP pools")
@@ -272,15 +277,6 @@ class ParseNetworkResponse(BaseModel):
     error: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
-
-
-class GenerateResponse(BaseModel):
-    success: bool
-    config_json: Optional[NormalizedNetworkRequest] = None
-    subnets: Optional[List[Dict[str, Any]]] = None
-    cli_script: Optional[str] = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
 
 
 class PktGenerateResponse(BaseModel):
@@ -354,7 +350,7 @@ class RoutingProtocol(str, Enum):
 
 
 class SubnetRequest(BaseModel):
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=64)
     required_hosts: Optional[int] = Field(default=None, ge=1)
     network: Optional[str] = Field(default=None)
     gateway: Optional[str] = Field(default=None)
@@ -379,9 +375,9 @@ class SubnetRequest(BaseModel):
 
 
 class DeviceConfig(BaseModel):
-    routers: int = Field(..., ge=1)
-    switches: int = Field(..., ge=0)
-    pcs: int = Field(..., ge=1)
+    routers: int = Field(..., ge=1, le=50)
+    switches: int = Field(..., ge=0, le=50)
+    pcs: int = Field(..., ge=1, le=200)
 
 
 class NetworkConfig(BaseModel):
@@ -402,3 +398,11 @@ class SubnetResult(BaseModel):
     total_hosts: int
     usable_hosts: int
     dns_server: Optional[str] = None
+
+class GenerateResponse(BaseModel):
+    success: bool
+    config_json: Optional[Union[NormalizedNetworkRequest, NetworkConfig, Dict[str, Any]]] = None
+    subnets: Optional[List[Union[SubnetResult, Dict[str, Any]]]] = None
+    cli_script: Optional[str] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None

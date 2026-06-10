@@ -76,8 +76,9 @@ def _fallback_review(analysis: PktAnalysisResponse, exercise_text: str | None) -
 
 
 def review_pkt_analysis(analysis: PktAnalysisResponse, exercise_text: str | None) -> PktReviewResult:
-    api_key = os.environ.get("MISTRAL_API_KEY")
-    if not api_key:
+    from app.config import settings
+    api_key_secret = settings.mistral_api_key
+    if not api_key_secret:
         return _fallback_review(analysis, exercise_text)
 
     retrieved_docs = retrieve_relevant_documents(
@@ -101,7 +102,7 @@ def review_pkt_analysis(analysis: PktAnalysisResponse, exercise_text: str | None
         "knowledge_base": retrieved_docs,
     }
 
-    client = Mistral(api_key=api_key)
+    client = Mistral(api_key=api_key_secret.get_secret_value())
     try:
         response = client.chat.complete(
             model="mistral-small-latest",

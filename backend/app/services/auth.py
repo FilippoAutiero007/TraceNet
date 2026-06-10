@@ -109,11 +109,10 @@ def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None
         return
 
     azp = str(claims.get("azp") or "").strip()
-    origin = request.headers.get("Origin", "").strip()
     if azp and azp in configured:
         return
-    if origin and origin in configured:
-        return
+
+    # Strictly rely on 'azp' claim; insecure 'Origin' check removed to prevent bypass.
     raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
 
