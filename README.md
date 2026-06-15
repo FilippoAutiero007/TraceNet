@@ -36,3 +36,33 @@ TraceNet è uno strumento full-stack che converte descrizioni in linguaggio natu
 MIT License - vedi [LICENSE](LICENSE) per dettagli.
 
 
+
+
+TraceNet - Cisco Packet Tracer Network Generator
+
+A Cisco Packet Tracer (.pkt) network generator from natural language with a web interface.
+
+🌐 What is TraceNet?
+
+TraceNet is a full-stack tool that converts natural language descriptions into .pkt files compatible with Cisco Packet Tracer 8.x. Simply describe the desired network ("2 routers, 3 switches, 10 PCs with OSPF and VLANs"), and TraceNet automatically generates:
+
+A .pkt file ready to open in Packet Tracer
+Complete IOS configurations for every device
+Optimized VLSM subnet calculations
+An XML debug file of the generated topology
+🌟 Features
+Backend (Python + FastAPI)
+🧠 NLP Parsing: Intelligent analysis of natural language descriptions using Mistral AI
+📊 Automatic VLSM: Optimized subnet calculation with a VLSM algorithm
+⚙️ IOS Configurations: Automatic generation of complete Cisco configurations
+📦 .pkt Export: Binary files compatible with Cisco Packet Tracer 8.x
+🔄 Routing Protocols: Support for Static Routing, RIP, OSPF, and EIGRP
+Frontend (React + TypeScript)
+🎨 Modern UI: Dark-themed interface built with Tailwind CSS and shadcn/ui
+📝 Predefined Templates: 4+ ready-to-use templates for common scenarios
+🖼️ Responsive Layout: Optimized design for desktop, tablet, and mobile devices
+⚡ Real-Time Feedback: Loading states and error handling
+📥 Direct Download: Download .pkt and XML debug files directly
+📄 License
+
+MIT License – see LICENSE for details.
