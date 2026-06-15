@@ -100,6 +100,11 @@ def _is_pro_plan(plan_slug: Optional[str]) -> bool:
 
 
 def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None:
+    """
+    Validate that the token was issued for an authorized party (azp).
+    We strictly rely on the signed 'azp' claim from the JWT.
+    Checking the 'Origin' header is insecure as it can be easily spoofed by non-browser clients.
+    """
     configured = [
         item.strip()
         for item in settings.clerk_authorized_parties.split(",")
@@ -109,11 +114,19 @@ def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None
         return
 
     azp = str(claims.get("azp") or "").strip()
-    origin = request.headers.get("Origin", "").strip()
     if azp and azp in configured:
         return
-    if origin and origin in configured:
-        return
+
+    # Log unauthorized party attempt for audit
+    from app.utils.errors import get_request_id
+    from logging import getLogger
+    getLogger("tracenet").warning(
+        "Unauthorized party (azp) detected",
+        extra={
+            "azp": azp,
+            "request_id": get_request_id(request),
+        }
+    )
     raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
 
