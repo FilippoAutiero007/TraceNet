@@ -32,3 +32,6 @@ tenacity==8.2.3
 
 # Rate limiting
 slowapi==0.1.9
+
+# Security
+defusedxml==0.7.1

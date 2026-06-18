@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DET
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Optional
@@ -47,7 +48,7 @@ class DeviceInfo:
 def analyze_pkt_bytes(pkt_data: bytes, filename: str | None = None) -> PktAnalysisResponse:
     try:
         xml_bytes = decrypt_pkt_data(pkt_data)
-        root = ET.fromstring(xml_bytes)
+        root = DET.fromstring(xml_bytes)
     except Exception as exc:  # noqa: BLE001
         return PktAnalysisResponse(
             success=False,
