@@ -10,6 +10,7 @@ from threading import Lock
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from app.config import settings
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
 from app.models.schemas import (
     GenerateResponse,
@@ -426,7 +427,7 @@ async def generate_pkt_file(
         subnets = _resolve_generation_subnets(str(plan["base_network"]), subnets_input)
         after_vlsm = perf_counter()
 
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        output_dir = str(settings.output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
         # Lock con timeout per evitare deadlock (max 30 secondi)
@@ -527,7 +528,7 @@ async def generate_pkt_file_manual(
         network_config_dict = _build_pkt_network_config_dict(plan)
         network_config_dict["dns_records"] = request.dns_records or []
 
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        output_dir = str(settings.output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
         # Lock con timeout per evitare deadlock (max 30 secondi)
@@ -608,6 +609,11 @@ async def analyze_pkt_file(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
+    # Prevent memory-exhaustion DoS by limiting file size to 10MB
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "Uploaded file exceeds 10MB limit.")
+
     pkt_data = await file.read()
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
@@ -624,6 +630,11 @@ async def analyze_pkt_file_report(
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
+
+    # Prevent memory-exhaustion DoS by limiting file size to 10MB
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "Uploaded file exceeds 10MB limit.")
 
     pkt_data = await file.read()
     if not pkt_data:
@@ -677,7 +688,7 @@ async def download_file(filename: str):
     
     _validate_filename(filename)
     
-    output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+    output_dir = str(settings.output_dir)
     filepath = Path(output_dir) / filename
     
     try:
