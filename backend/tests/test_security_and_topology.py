@@ -81,6 +81,7 @@ async def test_generate_network_keeps_requested_base_prefix_when_subnets_are_omi
 ):
     fake_request = Request({"type": "http", "headers": [], "method": "POST", "path": "/api/generate"})
     response = await generate_network(
+            fake_request,
         NormalizedNetworkRequest(
             base_network=base_network,
             routers=1,
@@ -89,7 +90,6 @@ async def test_generate_network_keeps_requested_base_prefix_when_subnets_are_omi
             routing_protocol="STATIC",
             subnets=[],
         ),
-        fake_request,
     )
 
     assert response.success is True

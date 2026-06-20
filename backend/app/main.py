@@ -12,8 +12,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from app.config import settings
+from app.utils.rate_limiter import limiter
 from app.utils.logger import setup_logger
 from app.utils.errors import build_error_payload
 
@@ -45,6 +48,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.middleware("http")
@@ -115,7 +120,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # CORS middleware for frontend
 # Allow localhost for dev + Vercel production/preview domains
 origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
-origin_regex = r"https://(?:tracenet|nettrace)(?:-git-[^.]+)?\.vercel\.app"
+origin_regex = r"https://(?:tracenet|nettrace)(?:-git-[^.]+)?\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
