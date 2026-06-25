@@ -74,6 +74,27 @@ npm run dev
 
 ---
 
+## 🤝 Contributing
+
+Contributions are welcome! TraceNet is a personal project that is still growing, and any help is greatly appreciated.
+
+If you'd like to contribute:
+
+1. **Fork** the repository
+2. **Create** a new branch (`git checkout -b feature/your-feature`)
+3. **Commit** your changes (`git commit -m 'Add your feature'`)
+4. **Push** to the branch (`git push origin feature/your-feature`)
+5. **Open a Pull Request** and describe what you've done
+
+You can also help by:
+- 🐛 **Reporting bugs** via [Issues](https://github.com/FilippoAutiero007/TraceNet/issues)
+- 💡 **Suggesting new features** or improvements
+- ⭐ **Starring the repo** if you find it useful
+
+> This project was born as a learning experience. Feedback and ideas from the community are the best way to make it grow!
+
+---
+
 ## 📄 License
 
 MIT License - see [LICENSE](./LICENSE) for details.
@@ -149,6 +170,27 @@ cd frontend
 npm install
 npm run dev
 ```
+
+---
+
+## 🤝 Contribuire al Progetto
+
+I contributi sono benvenuti! TraceNet è un progetto personale ancora in crescita e qualsiasi aiuto è apprezzato.
+
+Se vuoi contribuire:
+
+1. **Fai il fork** del repository
+2. **Crea** un nuovo branch (`git checkout -b feature/tua-feature`)
+3. **Committa** le modifiche (`git commit -m 'Aggiungi la tua feature'`)
+4. **Pusha** il branch (`git push origin feature/tua-feature`)
+5. **Apri una Pull Request** descrivendo cosa hai fatto
+
+Puoi anche aiutare:
+- 🐛 **Segnalando bug** tramite le [Issues](https://github.com/FilippoAutiero007/TraceNet/issues)
+- 💡 **Proponendo nuove funzionalità** o miglioramenti
+- ⭐ **Mettendo una stella al repo** se lo trovi utile
+
+> Questo progetto nasce come esperienza di apprendimento. Il feedback e le idee della community sono il modo migliore per farlo crescere!
 
 ---
 
