@@ -115,7 +115,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # CORS middleware for frontend
 # Allow localhost for dev + Vercel production/preview domains
 origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
-origin_regex = r"https://(?:tracenet|nettrace)(?:-git-[^.]+)?\.vercel\.app"
+# Anchor the regex with $ to prevent subdomain suffixing bypasses (e.g. .attacker.com)
+origin_regex = r"https://(?:tracenet|nettrace)(?:-git-[^.]+)?\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
