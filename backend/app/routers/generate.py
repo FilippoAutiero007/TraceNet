@@ -41,6 +41,8 @@ _pkt_generation_lock = Lock()
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["generate"])
 
+MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB limit
+
 
 def _finalize_pkt_analysis(pkt_data: bytes, filename: str, exercise_text: str | None) -> PktAnalysisResponse:
     analysis = analyze_pkt_bytes(pkt_data, filename=filename)
@@ -608,6 +610,9 @@ async def analyze_pkt_file(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
+    if file.size and file.size > MAX_UPLOAD_SIZE:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", f"File size exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)}MB limit.")
+
     pkt_data = await file.read()
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
@@ -624,6 +629,9 @@ async def analyze_pkt_file_report(
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
+
+    if file.size and file.size > MAX_UPLOAD_SIZE:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", f"File size exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)}MB limit.")
 
     pkt_data = await file.read()
     if not pkt_data:
