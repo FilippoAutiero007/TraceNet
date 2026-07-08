@@ -23,7 +23,7 @@ def _sanitize_pdf_text(value: str) -> str:
     return sanitized
 
 
-def _wrap_lines(text: str, max_chars: int = 92) -> list[str]:
+def _wrap_lines(text: str, max_chars: int = 88) -> list[str]:
     wrapped: list[str] = []
     for raw_line in text.splitlines():
         line = _sanitize_pdf_text(raw_line).strip()
@@ -51,64 +51,163 @@ def _escape_pdf_text(value: str) -> str:
 
 def _build_sections(analysis: PktAnalysisResponse) -> list[str]:
     lines: list[str] = [
-        "TraceNet Packet Tracer Analysis Report",
+        "=" * 60,
+        "  TraceNet - Report Analisi File Packet Tracer",
+        "=" * 60,
         "",
-        f"File: {analysis.filename or 'network.pkt'}",
-        f"Summary: {analysis.summary or 'No summary available.'}",
-        f"Devices: {analysis.device_count} | Links: {analysis.link_count} | Issues: {analysis.issue_count}",
+        f"  File: {analysis.filename or 'network.pkt'}",
+        f"  Dispositivi: {analysis.device_count}  |  Link: {analysis.link_count}  |  Problemi: {analysis.issue_count}",
         "",
     ]
 
     if analysis.exercise_text:
-        lines.extend(["Exercise text:", *_wrap_lines(analysis.exercise_text), ""])
+        lines.extend([
+            "-" * 60,
+            "  TESTO DELL'ESERCIZIO",
+            "-" * 60,
+            "",
+            *_wrap_lines(analysis.exercise_text),
+            "",
+        ])
 
-    if analysis.remediation_steps:
-        lines.append("Recommended remediation steps:")
-        for idx, step in enumerate(analysis.remediation_steps, start=1):
-            lines.extend(_wrap_lines(f"{idx}. {step}"))
-        lines.append("")
+    errors = [i for i in analysis.issues if i.severity == "error"]
+    warnings_ = [i for i in analysis.issues if i.severity == "warning"]
+    infos = [i for i in analysis.issues if i.severity == "info"]
+
+    lines.extend([
+        "-" * 60,
+        "  RIEPILOGO",
+        "-" * 60,
+        "",
+        f"  Errori: {len(errors)}",
+        f"  Avvisi: {len(warnings_)}",
+        f"  Info:   {len(infos)}",
+        "",
+    ])
 
     if analysis.review:
-        lines.append("AI review overview:")
-        lines.extend(_wrap_lines(analysis.review.overview))
-        lines.append("")
+        lines.extend([
+            "-" * 60,
+            "  REVISIONE AI",
+            "-" * 60,
+            "",
+        ])
+        if analysis.review.overview:
+            lines.append("  Panoramica:")
+            for wrap_line in _wrap_lines(analysis.review.overview):
+                lines.append(f"    {wrap_line}")
+            lines.append("")
         if analysis.review.things_correct:
-            lines.append("What is already correct:")
+            lines.append("  Cosa funziona gia':")
             for item in analysis.review.things_correct:
-                lines.extend(_wrap_lines(f"- {item}"))
+                for wrap_line in _wrap_lines(f"  - {item}"):
+                    lines.append(f"    {wrap_line[2:]}" if wrap_line.startswith("  ") else f"    {wrap_line}")
             lines.append("")
         if analysis.review.things_to_fix:
-            lines.append("What to fix:")
+            lines.extend([
+                "  Cosa correggere:",
+            ])
             for item in analysis.review.things_to_fix:
-                lines.extend(_wrap_lines(f"- {item}"))
-            lines.append("")
-        if analysis.review.alignment_with_exercise:
-            lines.append("Alignment with exercise:")
-            lines.extend(_wrap_lines(analysis.review.alignment_with_exercise))
+                for wrap_line in _wrap_lines(f"  - {item}"):
+                    lines.append(f"    {wrap_line[2:]}" if wrap_line.startswith("  ") else f"    {wrap_line}")
             lines.append("")
 
-    if analysis.issues:
-        lines.append("Detected issues:")
-        for idx, issue in enumerate(analysis.issues, start=1):
-            target = " - ".join(part for part in [issue.device or "", issue.interface or ""] if part)
-            header = f"{idx}. [{issue.severity.upper()}] {issue.title}"
+    if errors:
+        lines.extend([
+            "-" * 60,
+            "  ERRORI (da correggere obbligatoriamente)",
+            "-" * 60,
+            "",
+        ])
+        for idx, issue in enumerate(errors, start=1):
+            target_parts = [issue.device or "", issue.interface or ""]
+            target = " - ".join(p for p in target_parts if p)
+            header = f"  {idx}. {issue.title}"
             if target:
-                header += f" ({target})"
-            lines.extend(_wrap_lines(header))
-            lines.extend(_wrap_lines(issue.message))
-            if issue.suggestion:
-                lines.extend(_wrap_lines(f"How to fix: {issue.suggestion}"))
+                header += f"  [{target}]"
+            lines.append(header)
             lines.append("")
-    elif analysis.report:
-        lines.append("Detailed report:")
-        lines.extend(_wrap_lines(analysis.report))
+            for wrap_line in _wrap_lines(issue.message):
+                lines.append(f"     {wrap_line}")
+            lines.append("")
+            if issue.suggestion:
+                lines.append("     COME RISOLVERE:")
+                for wrap_line in _wrap_lines(issue.suggestion):
+                    lines.append(f"     > {wrap_line}")
+            lines.append("")
+
+    if warnings_:
+        lines.extend([
+            "-" * 60,
+            "  AVVISI (da verificare)",
+            "-" * 60,
+            "",
+        ])
+        for idx, issue in enumerate(warnings_, start=1):
+            target_parts = [issue.device or "", issue.interface or ""]
+            target = " - ".join(p for p in target_parts if p)
+            header = f"  {idx}. {issue.title}"
+            if target:
+                header += f"  [{target}]"
+            lines.append(header)
+            if issue.message:
+                for wrap_line in _wrap_lines(issue.message):
+                    lines.append(f"     {wrap_line}")
+            if issue.suggestion:
+                lines.append("     Suggerimento:")
+                for wrap_line in _wrap_lines(issue.suggestion):
+                    lines.append(f"     > {wrap_line}")
+            lines.append("")
+
+    if infos:
+        lines.extend([
+            "-" * 60,
+            "  INFO (consigli e best practice)",
+            "-" * 60,
+            "",
+        ])
+        for idx, issue in enumerate(infos, start=1):
+            target_parts = [issue.device or "", issue.interface or ""]
+            target = " - ".join(p for p in target_parts if p)
+            header = f"  {idx}. {issue.title}"
+            if target:
+                header += f"  [{target}]"
+            lines.append(header)
+            if issue.suggestion:
+                for wrap_line in _wrap_lines(issue.suggestion):
+                    lines.append(f"     {wrap_line}")
+            lines.append("")
+
+    if analysis.remediation_steps:
+        lines.extend([
+            "-" * 60,
+            "  PIANO DI CORREZIONE PASSO-PASSO",
+            "-" * 60,
+            "",
+        ])
+        for idx, step in enumerate(analysis.remediation_steps, start=1):
+            for wrap_line in _wrap_lines(f"{idx}. {step}"):
+                lines.append(f"  {wrap_line}")
+            lines.append("")
+
+    lines.extend([
+        "-" * 60,
+        "  GENERATO DA TRACENET",
+        "-" * 60,
+        "",
+        "  Apri il file .pkt in Cisco Packet Tracer,",
+        "  segui le correzioni suggerite e riesegui l'analisi.",
+        "  Per una revisione dettagliata, fornisci il testo",
+        "  dell'esercizio nell'analisi.",
+        "",
+    ])
 
     return lines
 
 
 def build_analysis_pdf_bytes(analysis: PktAnalysisResponse) -> bytes:
     lines = _build_sections(analysis)
-    lines_per_page = 46
+    lines_per_page = 44
     pages = [lines[i:i + lines_per_page] for i in range(0, len(lines), lines_per_page)] or [[]]
 
     objects: list[bytes] = []
@@ -118,17 +217,18 @@ def build_analysis_pdf_bytes(analysis: PktAnalysisResponse) -> bytes:
         objects.append(data)
         return len(objects)
 
-    font_obj = add_object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    font_obj = add_object("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
+    bold_font = add_object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
     page_ids: list[int] = []
     content_ids: list[int] = []
 
     for page_lines in pages:
-        text_commands = ["BT", "/F1 10 Tf", "50 790 Td", "14 TL"]
+        text_commands = ["BT", "/F1 9 Tf", "30 790 Td", "13 TL"]
         first = True
         for line in page_lines:
             escaped = _escape_pdf_text(line)
             if first:
-                text_commands.append(f"({_escape_pdf_text(line)}) Tj")
+                text_commands.append(f"({escaped}) Tj")
                 first = False
             else:
                 text_commands.append("T*")
@@ -137,7 +237,7 @@ def build_analysis_pdf_bytes(analysis: PktAnalysisResponse) -> bytes:
         stream = "\n".join(text_commands).encode("cp1252", errors="replace")
         content_obj = add_object(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream")
         content_ids.append(content_obj)
-        page_ids.append(add_object(""))  # placeholder
+        page_ids.append(add_object(""))
 
     pages_obj_id = add_object("")
     catalog_obj_id = add_object(f"<< /Type /Catalog /Pages {pages_obj_id} 0 R >>")
@@ -148,7 +248,7 @@ def build_analysis_pdf_bytes(analysis: PktAnalysisResponse) -> bytes:
     for idx, page_id in enumerate(page_ids):
         objects[page_id - 1] = (
             f"<< /Type /Page /Parent {pages_obj_id} 0 R /MediaBox [0 0 612 842] "
-            f"/Resources << /Font << /F1 {font_obj} 0 R >> >> /Contents {content_ids[idx]} 0 R >>"
+            f"/Resources << /Font << /F1 {font_obj} 0 R /F2 {bold_font} 0 R >> >> /Contents {content_ids[idx]} 0 R >>"
         ).encode("cp1252")
 
     pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")

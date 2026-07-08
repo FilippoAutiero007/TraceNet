@@ -299,7 +299,7 @@ class PktGenerateResponse(BaseModel):
 
 
 class PktAnalysisIssue(BaseModel):
-    severity: Literal["error", "warning"]
+    severity: Literal["error", "warning", "info"]
     code: str
     title: str
     message: str

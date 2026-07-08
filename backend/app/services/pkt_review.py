@@ -29,8 +29,9 @@ You must return exactly one JSON object with this schema:
   "alignment_with_exercise": "short paragraph or null"
 }
 Rules:
-- Be concrete and technically specific.
-- Use the analyzer findings as primary evidence.
+- CRITICAL: Base EVERY claim on the actual data in the `issues` and `analysis_summary` fields below. Never invent specific IP addresses, subnet masks, VLANs, or subnets that are not present in those fields.
+- If an issue code like LAN_SUBNET_MISMATCH or DUPLICATE_IP_ADDRESS is NOT listed in `issues`, do not mention subnet conflicts or duplicate IPs.
+- Be concrete and technically specific, using only evidence from the provided data.
 - If exercise_text exists, compare the imported file against it.
 - Mention both strengths and corrections.
 - Never return markdown. JSON only.

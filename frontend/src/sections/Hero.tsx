@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Activity, Zap, Brain, AlertTriangle } from 'lucide-react';
+import { ArrowRight, Activity, Zap, Brain, AlertTriangle, Github } from 'lucide-react';
 
 import { ParticleEffect } from '@/components/ParticleEffect';
 
@@ -174,6 +174,27 @@ export function Hero() {
               <p className="text-slate-400 text-sm">{feature.description}</p>
             </div>
           ))}
+        </div>
+
+        {/* Vuoi contribuire? Section */}
+        <div className="mt-60 text-center">
+          <h2 className="text-2xl font-bold text-white mb-8">Vuoi contribuire?</h2>
+          <div className="max-w-4xl mx-auto p-12 rounded-2xl bg-slate-900/50 border border-slate-800">
+            <p className="text-slate-300 mb-6">
+              TraceNet è un progetto open source. Contribuisci con codice, bug report o idee nuove!
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Button
+                size="lg"
+                variant="outline"
+                className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                onClick={() => window.open('https://github.com/FilippoAutiero007/TraceNet', '_blank')}
+              >
+                <Github className="w-5 h-5 mr-2" />
+                Vai su GitHub
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* Non hai Cisco? Section */}
