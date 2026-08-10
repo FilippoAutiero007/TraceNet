@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
     clerk_authorized_parties: str = Field(
         default="",
-        description="Optional comma-separated allowed azp/origin values for Clerk session tokens",
+        description="Optional comma-separated allowed 'azp' (authorized party) claim values for Clerk session tokens",
     )
     
     # Directories

@@ -100,6 +100,10 @@ def _is_pro_plan(plan_slug: Optional[str]) -> bool:
 
 
 def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None:
+    """
+    Ensure the token was issued for an authorized party (azp).
+    Strictly relies on the signed claim, ignoring the easily spoofable Origin header.
+    """
     configured = [
         item.strip()
         for item in settings.clerk_authorized_parties.split(",")
@@ -109,11 +113,10 @@ def _validate_authorized_party(claims: dict[str, Any], request: Request) -> None
         return
 
     azp = str(claims.get("azp") or "").strip()
-    origin = request.headers.get("Origin", "").strip()
     if azp and azp in configured:
         return
-    if origin and origin in configured:
-        return
+
+    # Insecure 'origin' check removed to prevent authorization bypass via header spoofing
     raise api_error(401, "AUTH_INVALID_TOKEN", "Invalid authentication token.")
 
 
