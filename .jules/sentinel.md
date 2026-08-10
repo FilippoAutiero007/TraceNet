@@ -1,0 +1,4 @@
+## 2025-05-14 - Authentication Bypass via Spoofable Origin Header
+**Vulnerability:** The authentication logic in `backend/app/services/auth.py` allowed validating a session token if either the `azp` claim in the JWT OR the `Origin` HTTP header matched the configured list of authorized parties.
+**Learning:** The `Origin` header is easily spoofed by non-browser clients (e.g., using curl or Postman), allowing an attacker with a valid JWT issued for a different client (but matching the `Origin` list) to potentially bypass intended client-side restrictions. Clerk's security policy specifically recommends validating the `azp` claim and ignoring the `Origin` header for this purpose.
+**Prevention:** Never rely on the `Origin` header for security-critical identity or authorization decisions. Always use cryptographically signed claims within the JWT (like `azp`) to verify the identity of the calling party.
