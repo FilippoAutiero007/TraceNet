@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
     # API Keys
-    mistral_api_key: Optional[str] = Field(default=None, description="Mistral AI API key")
+    mistral_api_key: Optional[SecretStr] = Field(default=None, description="Mistral AI API key")
     clerk_jwks_url: str = Field(default="https://api.clerk.com/v1/jwks", description="Clerk JWKS endpoint")
     clerk_pro_plan_slugs: str = Field(
         default="professional,pro",
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
     clerk_authorized_parties: str = Field(
         default="",
-        description="Optional comma-separated allowed azp/origin values for Clerk session tokens",
+        description="Optional comma-separated allowed azp values for Clerk session tokens",
     )
     
     # Directories
