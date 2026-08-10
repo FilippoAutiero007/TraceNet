@@ -75,7 +75,7 @@ async def test_parse_network_request_does_not_retry_deterministic_parser_errors(
         def __init__(self, api_key):
             self.chat = _FakeChat()
 
-    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    monkeypatch.setattr("app.config.settings.mistral_api_key", type("FakeSecret", (), {"get_secret_value": lambda: "test-key"}))
     monkeypatch.setattr("app.services.nlp_parser.Mistral", _FakeMistral)
     monkeypatch.setattr("app.services.nlp_parser.retrieve_relevant_documents", lambda *args, **kwargs: [])
 
