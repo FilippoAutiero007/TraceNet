@@ -428,7 +428,7 @@ async def generate_pkt_file(
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
@@ -439,7 +439,7 @@ async def generate_pkt_file(
                 error_code="GENERATION_BUSY",
                 request_id=get_request_id(http_request),
             )
-        
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
@@ -529,7 +529,7 @@ async def generate_pkt_file_manual(
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
@@ -540,7 +540,7 @@ async def generate_pkt_file_manual(
                 error_code="GENERATION_BUSY",
                 request_id=get_request_id(http_request),
             )
-        
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
@@ -674,12 +674,12 @@ async def get_user_capabilities(
 async def download_file(filename: str):
     """Download generated .pkt or .xml file with path traversal protection"""
     from pathlib import Path
-    
+
     _validate_filename(filename)
-    
+
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
     filepath = Path(output_dir) / filename
-    
+
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
             raise api_error(403, "SEC_ACCESS_DENIED", "Access denied.")
