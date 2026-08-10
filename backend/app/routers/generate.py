@@ -10,6 +10,7 @@ from threading import Lock
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from app.config import settings
 from app.models.manual_schemas import ManualNetworkRequest, ManualPktGenerateResponse
 from app.models.schemas import (
     GenerateResponse,
@@ -426,9 +427,9 @@ async def generate_pkt_file(
         subnets = _resolve_generation_subnets(str(plan["base_network"]), subnets_input)
         after_vlsm = perf_counter()
 
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        output_dir = str(settings.output_dir)
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
@@ -439,7 +440,7 @@ async def generate_pkt_file(
                 error_code="GENERATION_BUSY",
                 request_id=get_request_id(http_request),
             )
-        
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
@@ -527,9 +528,9 @@ async def generate_pkt_file_manual(
         network_config_dict = _build_pkt_network_config_dict(plan)
         network_config_dict["dns_records"] = request.dns_records or []
 
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        output_dir = str(settings.output_dir)
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
@@ -540,7 +541,7 @@ async def generate_pkt_file_manual(
                 error_code="GENERATION_BUSY",
                 request_id=get_request_id(http_request),
             )
-        
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
@@ -608,7 +609,12 @@ async def analyze_pkt_file(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
-    pkt_data = await file.read()
+    # Enforcement of file size limit (10MB) to prevent memory DoS.
+    limit = 10 * 1024 * 1024
+    pkt_data = await file.read(limit + 1)
+    if len(pkt_data) > limit:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds the 10MB limit.")
+
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
@@ -625,7 +631,12 @@ async def analyze_pkt_file_report(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
-    pkt_data = await file.read()
+    # Enforcement of file size limit (10MB) to prevent memory DoS.
+    limit = 10 * 1024 * 1024
+    pkt_data = await file.read(limit + 1)
+    if len(pkt_data) > limit:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds the 10MB limit.")
+
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
@@ -674,12 +685,12 @@ async def get_user_capabilities(
 async def download_file(filename: str):
     """Download generated .pkt or .xml file with path traversal protection"""
     from pathlib import Path
-    
+
     _validate_filename(filename)
-    
-    output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+
+    output_dir = str(settings.output_dir)
     filepath = Path(output_dir) / filename
-    
+
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
             raise api_error(403, "SEC_ACCESS_DENIED", "Access denied.")
