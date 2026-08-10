@@ -274,13 +274,6 @@ class ParseNetworkResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class GenerateResponse(BaseModel):
-    success: bool
-    config_json: Optional[NormalizedNetworkRequest] = None
-    subnets: Optional[List[Dict[str, Any]]] = None
-    cli_script: Optional[str] = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
 
 
 class PktGenerateResponse(BaseModel):
@@ -402,3 +395,11 @@ class SubnetResult(BaseModel):
     total_hosts: int
     usable_hosts: int
     dns_server: Optional[str] = None
+
+class GenerateResponse(BaseModel):
+    success: bool
+    config_json: Optional[Union[NormalizedNetworkRequest, NetworkConfig, Dict[str, Any]]] = None
+    subnets: Optional[List[Union[SubnetResult, Dict[str, Any]]]] = None
+    cli_script: Optional[str] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None
