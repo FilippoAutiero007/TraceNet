@@ -36,6 +36,7 @@ from app.services.pkt_generator import generate_cisco_config
 from app.services.subnet_calculator import calculate_vlsm
 from app.services.pkt_review import review_pkt_analysis
 from app.utils.errors import api_error, get_request_id
+from app.utils.rate_limiter import limiter
 
 _pkt_generation_lock = Lock()
 logger = logging.getLogger(__name__)
@@ -363,10 +364,11 @@ async def parse_network_endpoint(request: ParseNetworkRequest):
 
 
 @router.post("/generate", response_model=GenerateResponse)
-async def generate_network(request: NormalizedNetworkRequest, http_request: Request):
+@limiter.limit("10/minute")
+async def generate_network(request: Request, payload: NormalizedNetworkRequest):
     """Generate CLI configuration from normalized JSON only."""
     try:
-        plan = _build_generation_plan(request)
+        plan = _build_generation_plan(payload)
         # Ensure protocol normalization stays consistent with schema expectations.
         protocol = str(plan["routing_protocol"]).strip().upper()
         subnets_input = plan["subnets_input"]
@@ -388,36 +390,37 @@ async def generate_network(request: NormalizedNetworkRequest, http_request: Requ
             cli_script=cli_script,
         )
     except ValueError as exc:
-        logger.warning("Network generation validation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        logger.warning("Network generation validation failed", extra={"payload": payload.model_dump(), "request_id": get_request_id(request)}, exc_info=True)
         return GenerateResponse(
             success=False,
             error="Invalid network generation request.",
             error_code="SEC_INVALID_SCHEMA",
-            request_id=get_request_id(http_request),
+            request_id=get_request_id(request),
         )
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Network generation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        logger.error("Network generation failed", extra={"payload": payload.model_dump(), "request_id": get_request_id(request)}, exc_info=True)
         return GenerateResponse(
             success=False,
             error="Network generation failed.",
             error_code="GENERATION_FAILED",
-            request_id=get_request_id(http_request),
+            request_id=get_request_id(request),
         )
 
 
 @router.post("/generate-pkt", response_model=PktGenerateResponse)
+@limiter.limit("10/minute")
 async def generate_pkt_file(
-    request: NormalizedNetworkRequest,
-    http_request: Request,
+    request: Request,
+    payload: NormalizedNetworkRequest,
     auth: AuthContext | None = Depends(get_optional_auth_context),
 ):
     """Generate Packet Tracer .pkt from normalized JSON only (no free text)."""
     started_at = perf_counter()
     try:
-        plan = _build_generation_plan(request)
-        consume_generation_quota(auth, http_request)
+        plan = _build_generation_plan(payload)
+        consume_generation_quota(auth, request)
         after_quota = perf_counter()
         subnets_input = plan["subnets_input"]
 
@@ -428,7 +431,7 @@ async def generate_pkt_file(
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
@@ -437,9 +440,9 @@ async def generate_pkt_file(
                 success=False,
                 error="Server busy. Please retry in a few seconds.",
                 error_code="GENERATION_BUSY",
-                request_id=get_request_id(http_request),
+                request_id=get_request_id(request),
             )
-        
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
@@ -495,41 +498,42 @@ async def generate_pkt_file(
     except HTTPException:
         raise
     except ValueError as exc:
-        logger.warning("PKT generation validation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        logger.warning("PKT generation validation failed", extra={"payload": payload.model_dump(), "request_id": get_request_id(request)}, exc_info=True)
         return PktGenerateResponse(
             success=False,
             error="Invalid PKT generation request.",
             error_code="SEC_INVALID_SCHEMA",
-            request_id=get_request_id(http_request),
+            request_id=get_request_id(request),
         )
     except Exception as exc:
-        logger.error("PKT generation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        logger.error("PKT generation failed", extra={"payload": payload.model_dump(), "request_id": get_request_id(request)}, exc_info=True)
         return PktGenerateResponse(
             success=False,
             error="PKT generation failed.",
             error_code="GENERATION_FAILED",
-            request_id=get_request_id(http_request),
+            request_id=get_request_id(request),
         )
 
 
 @router.post("/generate-pkt-manual", response_model=ManualPktGenerateResponse)
+@limiter.limit("10/minute")
 async def generate_pkt_file_manual(
-    request: ManualNetworkRequest,
-    http_request: Request,
+    request: Request,
+    payload: ManualNetworkRequest,
     auth: AuthContext | None = Depends(get_optional_auth_context),
 ):
     """Generate Cisco Packet Tracer .pkt file from structured parameters."""
     try:
-        plan = _build_generation_plan(request)
-        consume_generation_quota(auth, http_request)
+        plan = _build_generation_plan(payload)
+        consume_generation_quota(auth, request)
         subnets = _resolve_generation_subnets(str(plan["base_network"]), plan["subnets_input"])
 
         network_config_dict = _build_pkt_network_config_dict(plan)
-        network_config_dict["dns_records"] = request.dns_records or []
+        network_config_dict["dns_records"] = payload.dns_records or []
 
         output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Lock con timeout per evitare deadlock (max 30 secondi)
         acquired = _pkt_generation_lock.acquire(timeout=30)
         if not acquired:
@@ -538,9 +542,9 @@ async def generate_pkt_file_manual(
                 success=False,
                 error="Server busy. Please retry in a few seconds.",
                 error_code="GENERATION_BUSY",
-                request_id=get_request_id(http_request),
+                request_id=get_request_id(request),
             )
-        
+
         try:
             result = save_pkt_file(subnets, network_config_dict, output_dir)
         finally:
@@ -581,29 +585,34 @@ async def generate_pkt_file_manual(
     except HTTPException:
         raise
     except ValueError as exc:
-        logger.warning("Manual PKT generation validation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        logger.warning("Manual PKT generation validation failed", extra={"payload": payload.model_dump(), "request_id": get_request_id(request)}, exc_info=True)
         return ManualPktGenerateResponse(
             success=False,
             error="Invalid PKT generation request.",
             error_code="SEC_INVALID_SCHEMA",
-            request_id=get_request_id(http_request),
+            request_id=get_request_id(request),
         )
     except Exception as exc:
-        logger.error("Manual PKT generation failed", extra={"request": request.model_dump(), "request_id": get_request_id(http_request)}, exc_info=True)
+        logger.error("Manual PKT generation failed", extra={"payload": payload.model_dump(), "request_id": get_request_id(request)}, exc_info=True)
         return ManualPktGenerateResponse(
             success=False,
             error="PKT generation failed.",
             error_code="GENERATION_FAILED",
-            request_id=get_request_id(http_request),
+            request_id=get_request_id(request),
         )
 
 
 @router.post("/analyze-pkt", response_model=PktAnalysisResponse)
+@limiter.limit("10/minute")
 async def analyze_pkt_file(
+    request: Request,
     file: UploadFile = File(...),
     exercise_text: str | None = Form(default=None),
 ):
     """Analyze an uploaded Packet Tracer file."""
+    if file.size and file.size > 10 * 1024 * 1024:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds 10MB limit.")
+
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
@@ -616,11 +625,16 @@ async def analyze_pkt_file(
 
 
 @router.post("/analyze-pkt-report")
+@limiter.limit("10/minute")
 async def analyze_pkt_file_report(
+    request: Request,
     file: UploadFile = File(...),
     exercise_text: str | None = Form(default=None),
 ):
     """Analyze an uploaded Packet Tracer file and return a PDF report."""
+    if file.size and file.size > 10 * 1024 * 1024:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds 10MB limit.")
+
     filename = file.filename or "network.pkt"
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
@@ -674,12 +688,12 @@ async def get_user_capabilities(
 async def download_file(filename: str):
     """Download generated .pkt or .xml file with path traversal protection"""
     from pathlib import Path
-    
+
     _validate_filename(filename)
-    
+
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
     filepath = Path(output_dir) / filename
-    
+
     try:
         if not filepath.resolve().is_relative_to(Path(output_dir).resolve()):
             raise api_error(403, "SEC_ACCESS_DENIED", "Access denied.")
