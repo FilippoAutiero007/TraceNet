@@ -26,6 +26,7 @@ from app.models.schemas import (
     SubnetRequest,
     DeviceConfig,
 )
+from app.config import settings
 from app.services.auth import AuthContext, get_optional_auth_context
 from app.services.generation_quota import consume_generation_quota, get_generation_quota_status
 from app.services.nlp_parser import ParserServiceError, parse_network_request
@@ -426,7 +427,7 @@ async def generate_pkt_file(
         subnets = _resolve_generation_subnets(str(plan["base_network"]), subnets_input)
         after_vlsm = perf_counter()
 
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        output_dir = str(settings.output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
         # Lock con timeout per evitare deadlock (max 30 secondi)
@@ -527,7 +528,7 @@ async def generate_pkt_file_manual(
         network_config_dict = _build_pkt_network_config_dict(plan)
         network_config_dict["dns_records"] = request.dns_records or []
 
-        output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+        output_dir = str(settings.output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
         # Lock con timeout per evitare deadlock (max 30 secondi)
@@ -608,7 +609,12 @@ async def analyze_pkt_file(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
-    pkt_data = await file.read()
+    # Prevent memory DoS by enforcing 10MB limit
+    limit = 10 * 1024 * 1024
+    pkt_data = await file.read(limit + 1)
+    if len(pkt_data) > limit:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds 10MB limit.")
+
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
@@ -625,7 +631,12 @@ async def analyze_pkt_file_report(
     if not filename.lower().endswith(".pkt"):
         raise api_error(400, "SEC_INVALID_FILE_TYPE", "Only .pkt files are supported.")
 
-    pkt_data = await file.read()
+    # Prevent memory DoS by enforcing 10MB limit
+    limit = 10 * 1024 * 1024
+    pkt_data = await file.read(limit + 1)
+    if len(pkt_data) > limit:
+        raise api_error(413, "SEC_FILE_TOO_LARGE", "File size exceeds 10MB limit.")
+
     if not pkt_data:
         raise api_error(400, "SEC_INVALID_FILE", "Uploaded file is empty.")
 
@@ -677,7 +688,7 @@ async def download_file(filename: str):
     
     _validate_filename(filename)
     
-    output_dir = os.environ.get("OUTPUT_DIR", "/tmp/tracenet")
+    output_dir = str(settings.output_dir)
     filepath = Path(output_dir) / filename
     
     try:
